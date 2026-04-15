@@ -7,7 +7,8 @@ import random
 import string
 from datetime import datetime
 from functools import wraps
-from typing import AsyncIterator
+from dataclasses import dataclass
+from typing import AsyncIterator, Optional
 import httpx
 from aiogram.types import Message
 from bs4 import BeautifulSoup
@@ -15,6 +16,12 @@ from settings import USER_AGENT
 
 class Retrying(Exception):
     pass
+
+
+@dataclass
+class TikTokVideo:
+    content: bytes
+    author: Optional[str] = None
 
 def retries(times: int):
     def decorator(func):
@@ -40,7 +47,7 @@ class TikTokAPI:
         self.link = 'tiktok.com'
         self.script_selector = 'script[id="SIGI_STATE"]'
 
-    async def handle_message(self, message: Message) -> AsyncIterator[bytes]:
+    async def handle_message(self, message: Message) -> AsyncIterator[TikTokVideo]:
         urls = self._extract_urls_from_message(message)
         for url in urls:
             video = await self.download_video(url)
@@ -70,6 +77,8 @@ class TikTokAPI:
         for data in modules:
             if data["id"] != page_id:
                 raise Retrying("video_id is different from page_id")
+            author = (data.get("author") if isinstance(data.get("author"), str)
+                      else (data.get("author", {}) or {}).get("uniqueId"))
             for addr_key in ("playAddr", "downloadAddr"):
                 raw = data["video"].get(addr_key)
                 if not raw:
@@ -78,7 +87,7 @@ class TikTokAPI:
                 video = await client.get(link, headers=self._user_agent)
                 video.raise_for_status()
                 if video.content:
-                    return video.content
+                    return TikTokVideo(content=video.content, author=author)
         raise Retrying("video not found")
     
     async def _secondary_method(self, client, url):
@@ -112,6 +121,7 @@ class TikTokAPI:
         if not video_info:
             raise Retrying("No video information found in __UNIVERSAL_DATA_FOR_REHYDRATION__")
 
+        author = (video_info.get("author", {}) or {}).get("uniqueId")
         video = video_info.get("video", {})
         for addr_key in ("playAddr", "downloadAddr"):
             download_link = video.get(addr_key)
@@ -120,13 +130,13 @@ class TikTokAPI:
             video_response = await client.get(download_link, headers=self._user_agent)
             if video_response.status_code != 200 or not video_response.content:
                 continue
-            return video_response.content
+            return TikTokVideo(content=video_response.content, author=author)
 
         raise Retrying("No working video link found")
 
 
     @retries(times=3)
-    async def download_video(self, url: str) -> bytes:
+    async def download_video(self, url: str) -> TikTokVideo:
         async with httpx.AsyncClient(headers=self.headers, timeout=30,
                                     cookies=self._tt_webid_v2, follow_redirects=True) as client:
             page = await client.get(url, headers=self._user_agent)

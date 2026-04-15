@@ -5,6 +5,7 @@ from aiogram.utils.exceptions import RetryAfter, BadRequest
 from aiogram.types import Message
 from bot import bot, dp
 from bot.api.tiktok import TikTokAPI
+from bot.overlay import add_author_overlay
 
 TikTok = TikTokAPI(
     headers={
@@ -17,11 +18,12 @@ TikTok = TikTokAPI(
 async def get_message(message: Message):
     try:
         async for video in TikTok.handle_message(message):
-            if not video:
+            if not video or not video.content:
                 continue
+            content = await add_author_overlay(video.content, video.author)
             await bot.send_video(
                 message.chat.id,
-                video,
+                content,
                 reply_to_message_id=message.message_id,
             )
     except RetryAfter as e:
