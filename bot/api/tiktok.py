@@ -70,10 +70,15 @@ class TikTokAPI:
         for data in modules:
             if data["id"] != page_id:
                 raise Retrying("video_id is different from page_id")
-            link = data["video"]["downloadAddr"].encode('utf-8').decode('unicode_escape')
-            if video := await client.get(link, headers=self._user_agent):
+            for addr_key in ("playAddr", "downloadAddr"):
+                raw = data["video"].get(addr_key)
+                if not raw:
+                    continue
+                link = raw.encode('utf-8').decode('unicode_escape')
+                video = await client.get(link, headers=self._user_agent)
                 video.raise_for_status()
-                return video.content
+                if video.content:
+                    return video.content
         raise Retrying("video not found")
     
     async def _secondary_method(self, client, url):
@@ -107,15 +112,17 @@ class TikTokAPI:
         if not video_info:
             raise Retrying("No video information found in __UNIVERSAL_DATA_FOR_REHYDRATION__")
 
-        download_link = video_info.get("video", {}).get("downloadAddr")
-        if not download_link:
-            raise Retrying("No download link found in video information")
+        video = video_info.get("video", {})
+        for addr_key in ("playAddr", "downloadAddr"):
+            download_link = video.get(addr_key)
+            if not download_link:
+                continue
+            video_response = await client.get(download_link, headers=self._user_agent)
+            if video_response.status_code != 200 or not video_response.content:
+                continue
+            return video_response.content
 
-        video_response = await client.get(download_link, headers=self._user_agent)
-        if video_response.status_code != 200:
-            raise Retrying("Failed to download the video")
-
-        return video_response.content
+        raise Retrying("No working video link found")
 
 
     @retries(times=3)
