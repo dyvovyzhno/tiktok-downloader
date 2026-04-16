@@ -25,7 +25,6 @@ Built on top of [aiogram](https://github.com/aiogram/aiogram)
 - SENTRY_DSN - To send unhandled exceptions to Sentry (default: empty = no reports)
 - ENVIRONMENT - Sentry environment variable (default: Local)
 - USER_AGENT - To override user-agent used to download videos (default: random every time)
-- GITHUB_API_URL, GITHUB_API_TOKEN, GITHUB_API_USER_NAME, GITHUB_API_USER_EMAIL - 
 
 
 ## Local
