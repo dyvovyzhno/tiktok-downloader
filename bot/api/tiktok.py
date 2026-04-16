@@ -35,7 +35,7 @@ def retries(times: int):
                     logging.warning(f"Retrying attempt {attempt + 1} of {times} failed: {str(ex)}")
                     last_exception = ex
                     await asyncio.sleep(0.5 * (attempt + 1))
-            logging.error("All retry attempts failed.")
+            logging.warning("All retry attempts failed.")
             raise last_exception
         return wrapper
     return decorator

@@ -1,10 +1,11 @@
 # bot/handlers/messages.py
 
 import asyncio
+import logging
 from aiogram.utils.exceptions import RetryAfter, BadRequest
 from aiogram.types import Message
 from bot import bot, dp
-from bot.api.tiktok import TikTokAPI
+from bot.api.tiktok import TikTokAPI, Retrying
 from bot.overlay import add_author_overlay
 
 TikTok = TikTokAPI(
@@ -26,6 +27,12 @@ async def get_message(message: Message):
                 content,
                 reply_to_message_id=message.message_id,
             )
+    except Retrying as e:
+        logging.warning(f"Could not download video: {e}")
+        try:
+            await message.reply("Не вдалось завантажити це відео (можливо приватне чи видалене).")
+        except BadRequest:
+            pass
     except RetryAfter as e:
         wait_time = int(e.timeout)
         print(f"Rate limit hit. Waiting for {wait_time} seconds before retrying...")

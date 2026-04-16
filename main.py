@@ -10,7 +10,7 @@ from sentry_sdk.integrations.aiohttp import AioHttpIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
 
 from bot import bot, dp
-import bot.handlers # noqa: This import ensures that the handlers are registered
+from bot import handlers as _handlers  # noqa: F401  registers handlers
 from settings import ENVIRONMENT, SENTRY_DSN
 
 # Initialize Sentry
