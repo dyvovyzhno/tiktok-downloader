@@ -8,6 +8,7 @@ from bot import bot, dp
 from bot.api.tiktok import TikTokAPI, Retrying
 from bot.overlay import add_author_overlay
 from bot import analytics
+from bot import telemetry
 
 TikTok = TikTokAPI(
     headers={
@@ -37,9 +38,11 @@ async def get_message(message: Message):
             )
             analytics.record(uid, message.chat.id, message.chat.type,
                              "ok", len(content))
+            telemetry.record_download(message.chat.type, len(content))
     except Retrying as e:
         logging.warning(f"Could not download video: {e}")
         analytics.record(uid, message.chat.id, message.chat.type, "fail")
+        telemetry.record_failure(message.chat.type, "download_failed")
         try:
             await message.reply("Не вдалось завантажити це відео (можливо приватне чи видалене).")
         except BadRequest:
@@ -52,6 +55,7 @@ async def get_message(message: Message):
     except BadRequest as e:
         error_message = str(e)
         analytics.record(uid, message.chat.id, message.chat.type, "error")
+        telemetry.record_failure(message.chat.type, "send_failed")
         print(f"Failed to send video due to: {error_message}")
         if "Not enough rights" in error_message:
             try:
