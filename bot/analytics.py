@@ -46,6 +46,12 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 CREATE INDEX IF NOT EXISTS idx_events_anon_user ON events(anon_user);
+
+CREATE TABLE IF NOT EXISTS known_users (
+    chat_id     INTEGER PRIMARY KEY,
+    first_seen  REAL    NOT NULL,
+    last_seen   REAL    NOT NULL
+);
 """
 
 
@@ -86,6 +92,33 @@ def record(user_id: int, chat_id: int, chat_type: str,
             )
     except Exception:
         logging.exception("analytics.record failed")
+
+
+def touch_user(chat_id: int):
+    """Register or update a private-chat user for future broadcasts."""
+    try:
+        now = time.time()
+        with _connect() as conn:
+            conn.execute(
+                "INSERT INTO known_users (chat_id, first_seen, last_seen)"
+                " VALUES (?, ?, ?)"
+                " ON CONFLICT(chat_id) DO UPDATE SET last_seen=excluded.last_seen",
+                (chat_id, now, now),
+            )
+    except Exception:
+        logging.exception("analytics.touch_user failed")
+
+
+def get_broadcast_recipients() -> list[int]:
+    """Return all known private-chat user IDs."""
+    try:
+        with _connect() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT chat_id FROM known_users ORDER BY last_seen DESC")
+            return [row[0] for row in cur.fetchall()]
+    except Exception:
+        logging.exception("analytics.get_broadcast_recipients failed")
+        return []
 
 
 def get_stats() -> dict:
