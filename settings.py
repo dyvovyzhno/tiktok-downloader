@@ -14,5 +14,9 @@ OTEL_ENDPOINT = config('OTEL_ENDPOINT', default='')
 OTEL_AUTH_TOKEN = config('OTEL_AUTH_TOKEN', default='')
 OTEL_SERVICE_NAME = config('OTEL_SERVICE_NAME', default='tiktok-downloader')
 
+# Supabase
+SUPABASE_URL = config('SUPABASE_URL', default='')
+SUPABASE_KEY = config('SUPABASE_KEY', default='')
+
 # Download queue
 MAX_CONCURRENT_DOWNLOADS = config('MAX_CONCURRENT_DOWNLOADS', default=2, cast=int)

@@ -27,7 +27,7 @@ def _watermark_keyboard(key: str) -> InlineKeyboardMarkup:
 async def get_message(message: Message):
     uid = _user_id(message)
     if message.chat.type == "private":
-        analytics.touch_user(message.chat.id)
+        await analytics.touch_user(message.chat.id)
     track = uid not in ANALYTICS_EXCLUDE_IDS
 
     urls = extract_urls(message)
