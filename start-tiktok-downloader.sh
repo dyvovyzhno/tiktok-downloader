@@ -69,6 +69,8 @@ build_binary() {
     rm -rf dist build
     pyinstaller main.py --onefile --name tiktok-downloader \
         --collect-submodules opentelemetry \
+        --hidden-import opentelemetry.context.contextvars_context \
+        --collect-submodules grpc \
         >/dev/null
     chmod a+x "$BINARY"
     echo "binary built"
