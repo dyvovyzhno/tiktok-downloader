@@ -1,43 +1,71 @@
+# TikTok Downloader — Telegram Bot
 
+Telegram bot that downloads TikTok videos. Share a link in any chat where the bot is present — it will reply with the video. No commands needed.
 
-# [TikTokDownloader](https://t.me/IWillMakeYouWatchTikTokByThisBot): Telegram bot for TikTok
+## Features
 
-## Description
+- Automatic TikTok link detection (works in private chats, groups and channels)
+- Author watermark overlay (optional, user chooses per video)
+- Download queue with configurable concurrency (default: 2 parallel downloads)
+- Anonymous usage analytics via Supabase
+- Admin commands: `/stats`, `/broadcast`
+- OpenTelemetry metrics export (Dash0 / Grafana Cloud)
+- PyInstaller binary packaging for easy deployment
 
-This bot will send you a video from a TikTok.
+## Environment Variables
 
-Just share a link to the chat (no need to mention the bot)
+Create a `.env` file in the project root.
 
-## Thanks to
+### Required
 
-Built on top of [aiogram](https://github.com/aiogram/aiogram)
+| Variable | Description |
+|----------|-------------|
+| `API_TOKEN` | Telegram bot token from [@BotFather](https://t.me/BotFather) |
 
-# Installation
+### Optional
 
-## Env
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ADMIN_ID` | `0` | Telegram user ID for `/stats` and `/broadcast` access |
+| `ANALYTICS_EXCLUDE_IDS` | | Comma-separated Telegram user IDs to exclude from analytics |
+| `SUPABASE_URL` | | Supabase project URL (e.g. `https://xxx.supabase.co`) |
+| `SUPABASE_KEY` | | Supabase `service_role` key |
+| `SENTRY_DSN` | | Sentry DSN for error tracking |
+| `ENVIRONMENT` | `Local` | Sentry environment tag |
+| `USER_AGENT` | random | Override User-Agent for TikTok requests |
+| `MAX_CONCURRENT_DOWNLOADS` | `2` | Max parallel video downloads |
+| `OTEL_ENDPOINT` | | OpenTelemetry gRPC endpoint |
+| `OTEL_AUTH_TOKEN` | | OpenTelemetry auth token |
+| `OTEL_SERVICE_NAME` | `tiktok-downloader` | OpenTelemetry service name |
 
-(*REQUIRED*)
+## Supabase Setup
 
-- API_TOKEN - Bot token from BotFather 
+If you want cloud analytics, create a Supabase project and run `supabase_schema.sql` in the SQL Editor. Use the `service_role` key (Settings → API) as `SUPABASE_KEY`.
 
-(*OPTIONAL*)
-- USER_ID - To give access only to specific user id (default: empty = all users)
-- SENTRY_DSN - To send unhandled exceptions to Sentry (default: empty = no reports)
-- ENVIRONMENT - Sentry environment variable (default: Local)
-- USER_AGENT - To override user-agent used to download videos (default: random every time)
-
-
-## Local
+## Installation
 
 ```bash
-$ git clone https://github.com/preckrasno/tiktok-downloader
-$ cd tiktok-downloader
-$ echo "API_TOKEN=foo:bar" >> .env
-$ sudo apt update
-$ sudo apt install python3-pip
-$ sudo apt install python3.10-venv
-$ chmod a+x start-tiktok-downloader.sh
-$ ./start-tiktok-downloader.sh
+git clone https://github.com/preckrasno/tiktok-downloader
+cd tiktok-downloader
+echo "API_TOKEN=your_token_here" >> .env
+chmod a+x start-tiktok-downloader.sh
+./start-tiktok-downloader.sh
 ```
 
+The script creates a venv, installs dependencies, builds a PyInstaller binary and starts the bot. It also sets up a cron job to keep the bot alive.
 
+### Deploy Script Flags
+
+| Flag | Description |
+|------|-------------|
+| (none) | Keep-alive: start the bot if not running |
+| `-d` | Deploy: `git pull`, rebuild, restart |
+| `-r` | Hard reset: wipe venv/dist, rebuild from scratch |
+| `-s` | Stop the bot |
+| `-h` | Show help |
+
+## Built With
+
+- [aiogram](https://github.com/aiogram/aiogram) 2.19 — Telegram Bot framework
+- [httpx](https://github.com/encode/httpx) — HTTP client (TikTok API + Supabase)
+- [ffmpeg](https://ffmpeg.org/) — Video watermark overlay (must be installed on the server)
