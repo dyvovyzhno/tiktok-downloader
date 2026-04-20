@@ -11,6 +11,7 @@ from sentry_sdk.integrations.logging import LoggingIntegration
 
 from bot import bot, dp
 from bot import handlers as _handlers  # noqa: F401  registers handlers
+from bot.queue import start_workers
 from settings import ENVIRONMENT, SENTRY_DSN
 
 # Initialize Sentry
@@ -27,6 +28,7 @@ def init_sentry():
 async def main():
     try:
         logging.info('Started')
+        await start_workers()
         await dp.start_polling()
     finally:
         logging.info('Exited')

@@ -13,3 +13,6 @@ ANALYTICS_EXCLUDE_IDS = set(
 OTEL_ENDPOINT = config('OTEL_ENDPOINT', default='')
 OTEL_AUTH_TOKEN = config('OTEL_AUTH_TOKEN', default='')
 OTEL_SERVICE_NAME = config('OTEL_SERVICE_NAME', default='tiktok-downloader')
+
+# Download queue
+MAX_CONCURRENT_DOWNLOADS = config('MAX_CONCURRENT_DOWNLOADS', default=2, cast=int)
