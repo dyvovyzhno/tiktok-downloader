@@ -1,7 +1,10 @@
 # bot/handlers/commands.py
 
+import asyncio
+import logging
 from aiogram.types import Message
-from bot import dp
+from aiogram.utils.exceptions import BotBlocked, ChatNotFound, UserDeactivated
+from bot import bot, dp
 from bot import analytics
 from settings import ADMIN_ID
 
@@ -16,6 +19,8 @@ async def cmd_stats(message: Message):
         await message.reply("Статистика поки порожня.")
         return
 
+    recipients = analytics.get_broadcast_recipients()
+
     lines = [
         "📊 <b>Статистика бота</b>",
         "",
@@ -25,6 +30,7 @@ async def cmd_stats(message: Message):
         f"Унікальних користувачів: <b>{stats['unique_users']}</b>",
         f"Унікальних чатів: <b>{stats['unique_chats']}</b>",
         f"Завантажено відео: <b>{stats['total_video_mb']} MB</b>",
+        f"Відомих юзерів (для broadcast): <b>{len(recipients)}</b>",
     ]
 
     if stats.get("daily_last_7d"):
@@ -41,3 +47,46 @@ async def cmd_stats(message: Message):
             )
 
     await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@dp.message_handler(commands=["broadcast"])
+async def cmd_broadcast(message: Message):
+    if ADMIN_ID and message.from_user.id != ADMIN_ID:
+        return
+
+    text = message.get_args()
+    if not text:
+        await message.reply(
+            "Використання: <code>/broadcast Ваше повідомлення</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    recipients = analytics.get_broadcast_recipients()
+    if not recipients:
+        await message.reply("Немає відомих користувачів для розсилки.")
+        return
+
+    await message.reply(
+        f"Розсилка <b>{len(recipients)}</b> юзерам (~{len(recipients)} хв)...",
+        parse_mode="HTML",
+    )
+
+    sent, failed, blocked = 0, 0, 0
+    for chat_id in recipients:
+        try:
+            await bot.send_message(chat_id, text)
+            sent += 1
+        except (BotBlocked, ChatNotFound, UserDeactivated):
+            blocked += 1
+        except Exception as e:
+            failed += 1
+            logging.warning(f"broadcast to {chat_id} failed: {e}")
+        await asyncio.sleep(60)
+
+    await message.reply(
+        f"Розсилка завершена:\n"
+        f"  ✅ доставлено: {sent}\n"
+        f"  🚫 заблоковано/видалено: {blocked}\n"
+        f"  ❌ помилки: {failed}",
+    )

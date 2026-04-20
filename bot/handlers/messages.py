@@ -27,6 +27,8 @@ def _user_id(message: Message) -> int:
 @dp.channel_post_handler(content_types=["text"])
 async def get_message(message: Message):
     uid = _user_id(message)
+    if message.chat.type == "private":
+        analytics.touch_user(message.chat.id)
     track = uid not in ANALYTICS_EXCLUDE_IDS
     try:
         async for video in TikTok.handle_message(message):
