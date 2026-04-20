@@ -14,12 +14,12 @@ async def cmd_stats(message: Message):
     if ADMIN_ID and message.from_user.id != ADMIN_ID:
         return
 
-    stats = analytics.get_stats()
+    stats = await analytics.get_stats()
     if not stats:
         await message.reply("Статистика поки порожня.")
         return
 
-    recipients = analytics.get_broadcast_recipients()
+    recipients = await analytics.get_broadcast_recipients()
 
     lines = [
         "📊 <b>Статистика бота</b>",
@@ -62,7 +62,7 @@ async def cmd_broadcast(message: Message):
         )
         return
 
-    recipients = analytics.get_broadcast_recipients()
+    recipients = await analytics.get_broadcast_recipients()
     if not recipients:
         await message.reply("Немає відомих користувачів для розсилки.")
         return
