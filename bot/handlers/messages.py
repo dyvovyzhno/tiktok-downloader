@@ -1,16 +1,25 @@
 # bot/handlers/messages.py
 
 import logging
-from aiogram.types import Message
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from bot import dp
 from bot import analytics
-from bot.queue import DownloadTask, enqueue, extract_urls, total_ahead
+from bot.queue import extract_urls, store_pending
 from settings import ANALYTICS_EXCLUDE_IDS
 
 
 def _user_id(message: Message) -> int:
     """Telegram omits from_user in channel posts."""
     return message.from_user.id if message.from_user else message.chat.id
+
+
+def _watermark_keyboard(key: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("✅ З ватермаркою", callback_data=f"wm:y:{key}"),
+        InlineKeyboardButton("❌ Без", callback_data=f"wm:n:{key}"),
+    )
+    return kb
 
 
 @dp.message_handler(content_types=["text"])
@@ -25,31 +34,19 @@ async def get_message(message: Message):
     if not urls:
         return
 
-    # Snapshot queue depth *before* adding our tasks.
-    ahead = total_ahead()
-
-    for url in urls:
-        await enqueue(DownloadTask(
-            url=url,
-            message=message,
-            user_id=uid,
-            chat_id=message.chat.id,
-            chat_type=message.chat.type,
-            track=track,
-        ))
-
-    # Instant feedback
-    n = len(urls)
-    if ahead == 0:
-        feedback = "⏳ Завантажую відео..." if n == 1 else f"⏳ Завантажую {n} відео..."
-    else:
-        pos = ahead + 1
-        if n == 1:
-            feedback = f"📥 Посилання отримано! В черзі: {pos}"
-        else:
-            feedback = f"📥 Отримано {n} посилань! В черзі: {pos}"
+    key = store_pending(
+        urls=urls,
+        message=message,
+        user_id=uid,
+        chat_id=message.chat.id,
+        chat_type=message.chat.type,
+        track=track,
+    )
 
     try:
-        await message.reply(feedback)
+        await message.reply(
+            "Додати ватермарку автора?",
+            reply_markup=_watermark_keyboard(key),
+        )
     except Exception:
-        logging.debug("Could not send queue feedback", exc_info=True)
+        logging.debug("Could not send watermark question", exc_info=True)

@@ -3,11 +3,17 @@
 # Download queue with limited concurrency.  Workers pull tasks from an
 # asyncio.Queue and process at most MAX_CONCURRENT_DOWNLOADS in parallel,
 # protecting the (weak) server from overload.
+#
+# The message handler asks the user (via inline buttons) whether to add
+# an author watermark *before* queuing the download.  The callback
+# handler then enqueues the task with the chosen flag.
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
+import uuid
 from dataclasses import dataclass
 from typing import Optional
 
@@ -23,6 +29,51 @@ from settings import MAX_CONCURRENT_DOWNLOADS
 
 _tiktok = TikTokAPI(headers={"Referer": "https://www.tiktok.com/"})
 
+# ── pending tasks (waiting for watermark choice) ─────────────────────
+
+PENDING_TTL = 300  # 5 min — expire if no button tap
+
+
+@dataclass
+class PendingTask:
+    """Stored while we wait for the user to choose watermark on/off."""
+    urls: list[str]
+    message: Message
+    user_id: int
+    chat_id: int
+    chat_type: str
+    track: bool
+    created: float
+
+
+_pending: dict[str, PendingTask] = {}
+
+
+def store_pending(urls: list[str], message: Message,
+                  user_id: int, chat_id: int, chat_type: str,
+                  track: bool) -> str:
+    key = uuid.uuid4().hex[:12]
+    _pending[key] = PendingTask(
+        urls=urls, message=message, user_id=user_id,
+        chat_id=chat_id, chat_type=chat_type, track=track,
+        created=time.time(),
+    )
+    return key
+
+
+def pop_pending(key: str) -> Optional[PendingTask]:
+    return _pending.pop(key, None)
+
+
+def _cleanup_stale():
+    now = time.time()
+    stale = [k for k, v in _pending.items() if now - v.created > PENDING_TTL]
+    for k in stale:
+        _pending.pop(k, None)
+
+
+# ── download queue ───────────────────────────────────────────────────
+
 
 @dataclass
 class DownloadTask:
@@ -32,44 +83,38 @@ class DownloadTask:
     chat_id: int
     chat_type: str
     track: bool
+    with_watermark: bool = True
 
 
 _queue: asyncio.Queue = asyncio.Queue()
 _active: int = 0
 
 
-def pending() -> int:
-    """Tasks waiting in the queue (not yet picked up by a worker)."""
+def pending_count() -> int:
     return _queue.qsize()
 
 
 def active() -> int:
-    """Tasks currently being downloaded / processed."""
     return _active
 
 
 def total_ahead() -> int:
-    """Total tasks ahead of a hypothetical new task."""
     return _queue.qsize() + _active
 
 
 async def enqueue(task: DownloadTask) -> int:
-    """Add a task to the queue.  Returns the number of tasks ahead."""
     ahead = _queue.qsize() + _active
     await _queue.put(task)
     return ahead
 
 
 def extract_urls(message: Message) -> list[str]:
-    """Pull TikTok URLs out of a message (public helper so the handler
-    doesn't need its own TikTokAPI instance)."""
     return list(_tiktok._extract_urls_from_message(message))
 
 
 # ── worker logic ─────────────────────────────────────────────────────
 
-async def _send_video(task: DownloadTask, content: bytes):
-    """Send the video, retrying once on Telegram rate-limit."""
+async def send_video(task: DownloadTask, content: bytes):
     try:
         await bot.send_video(
             task.chat_id,
@@ -87,11 +132,9 @@ async def _send_video(task: DownloadTask, content: bytes):
 
 
 async def _reply_error(task: DownloadTask, text: str):
-    """Best-effort error reply to the user."""
     try:
         await bot.send_message(
-            task.chat_id,
-            text,
+            task.chat_id, text,
             reply_to_message_id=task.message.message_id,
         )
     except BadRequest:
@@ -99,19 +142,26 @@ async def _reply_error(task: DownloadTask, text: str):
 
 
 async def _process(task: DownloadTask):
-    """Download one video and send it back."""
     global _active
     _active += 1
     try:
+        _cleanup_stale()
+
         video = await _tiktok.download_video(task.url)
         if not video or not video.content:
             return
-        content = await add_author_overlay(video.content, video.author)
-        await _send_video(task, content)
+
+        if task.with_watermark and video.author:
+            content = await add_author_overlay(video.content, video.author)
+        else:
+            content = video.content
+
+        await send_video(task, content)
         if task.track:
             analytics.record(task.user_id, task.chat_id, task.chat_type,
                              "ok", len(content))
             telemetry.record_download(task.chat_type, len(content))
+
     except Retrying as e:
         logging.warning(f"Could not download video: {e}")
         if task.track:
@@ -145,7 +195,6 @@ async def _process(task: DownloadTask):
 
 
 async def _worker(wid: int):
-    """Long-running worker coroutine."""
     logging.info(f"Download worker #{wid} started")
     while True:
         task = await _queue.get()
@@ -158,8 +207,6 @@ async def _worker(wid: int):
 
 
 async def start_workers(count: Optional[int] = None):
-    """Spawn *count* worker coroutines.  Call once when the event loop
-    is already running (e.g. right before ``dp.start_polling()``)."""
     n = count or MAX_CONCURRENT_DOWNLOADS
     for i in range(n):
         asyncio.create_task(_worker(i + 1))
