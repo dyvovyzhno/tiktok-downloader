@@ -7,6 +7,7 @@ from aiogram.types import Message
 from bot import bot, dp
 from bot.api.tiktok import TikTokAPI, Retrying
 from bot.overlay import add_author_overlay
+from bot import analytics
 
 TikTok = TikTokAPI(
     headers={
@@ -14,9 +15,16 @@ TikTok = TikTokAPI(
     }
 )
 
+
+def _user_id(message: Message) -> int:
+    """Telegram omits from_user in channel posts."""
+    return message.from_user.id if message.from_user else message.chat.id
+
+
 @dp.message_handler(content_types=["text"])
 @dp.channel_post_handler(content_types=["text"])
 async def get_message(message: Message):
+    uid = _user_id(message)
     try:
         async for video in TikTok.handle_message(message):
             if not video or not video.content:
@@ -27,8 +35,11 @@ async def get_message(message: Message):
                 content,
                 reply_to_message_id=message.message_id,
             )
+            analytics.record(uid, message.chat.id, message.chat.type,
+                             "ok", len(content))
     except Retrying as e:
         logging.warning(f"Could not download video: {e}")
+        analytics.record(uid, message.chat.id, message.chat.type, "fail")
         try:
             await message.reply("Не вдалось завантажити це відео (можливо приватне чи видалене).")
         except BadRequest:
@@ -40,13 +51,12 @@ async def get_message(message: Message):
         await get_message(message)
     except BadRequest as e:
         error_message = str(e)
+        analytics.record(uid, message.chat.id, message.chat.type, "error")
         print(f"Failed to send video due to: {error_message}")
         if "Not enough rights" in error_message:
             try:
-                # Attempt to notify the user about permission issues
                 await message.reply("I do not have enough rights to send videos or messages in this chat. Please adjust my permissions.")
             except BadRequest:
-                # If even the reply fails, log the issue and possibly alert an admin
                 print("Could not notify the user due to insufficient permissions.")
         elif "Message to reply not found" in error_message:
             try:
