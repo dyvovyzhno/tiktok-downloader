@@ -9,6 +9,7 @@ from bot.api.tiktok import TikTokAPI, Retrying
 from bot.overlay import add_author_overlay
 from bot import analytics
 from bot import telemetry
+from settings import ANALYTICS_EXCLUDE_IDS
 
 TikTok = TikTokAPI(
     headers={
@@ -26,6 +27,7 @@ def _user_id(message: Message) -> int:
 @dp.channel_post_handler(content_types=["text"])
 async def get_message(message: Message):
     uid = _user_id(message)
+    track = uid not in ANALYTICS_EXCLUDE_IDS
     try:
         async for video in TikTok.handle_message(message):
             if not video or not video.content:
@@ -36,13 +38,15 @@ async def get_message(message: Message):
                 content,
                 reply_to_message_id=message.message_id,
             )
-            analytics.record(uid, message.chat.id, message.chat.type,
-                             "ok", len(content))
-            telemetry.record_download(message.chat.type, len(content))
+            if track:
+                analytics.record(uid, message.chat.id, message.chat.type,
+                                 "ok", len(content))
+                telemetry.record_download(message.chat.type, len(content))
     except Retrying as e:
         logging.warning(f"Could not download video: {e}")
-        analytics.record(uid, message.chat.id, message.chat.type, "fail")
-        telemetry.record_failure(message.chat.type, "download_failed")
+        if track:
+            analytics.record(uid, message.chat.id, message.chat.type, "fail")
+            telemetry.record_failure(message.chat.type, "download_failed")
         try:
             await message.reply("Не вдалось завантажити це відео (можливо приватне чи видалене).")
         except BadRequest:
@@ -54,8 +58,9 @@ async def get_message(message: Message):
         await get_message(message)
     except BadRequest as e:
         error_message = str(e)
-        analytics.record(uid, message.chat.id, message.chat.type, "error")
-        telemetry.record_failure(message.chat.type, "send_failed")
+        if track:
+            analytics.record(uid, message.chat.id, message.chat.type, "error")
+            telemetry.record_failure(message.chat.type, "send_failed")
         print(f"Failed to send video due to: {error_message}")
         if "Not enough rights" in error_message:
             try:
