@@ -5,6 +5,7 @@
 import logging
 
 from aiogram.types import CallbackQuery
+from aiogram.utils.exceptions import InvalidQueryID
 
 from bot import dp
 from bot.queue import (
@@ -12,18 +13,26 @@ from bot.queue import (
 )
 
 
+async def _safe_answer(callback: CallbackQuery, text: str = None):
+    """Answer a callback query, ignoring expired/invalid query IDs."""
+    try:
+        await callback.answer(text)
+    except InvalidQueryID:
+        pass
+
+
 @dp.callback_query_handler(lambda cb: cb.data and cb.data.startswith("wm:"))
 async def on_watermark_choice(callback: CallbackQuery):
     parts = callback.data.split(":", 2)  # wm : y/n : key
     if len(parts) != 3:
-        await callback.answer("Помилка")
+        await _safe_answer(callback, "Помилка")
         return
 
     _, choice, key = parts
     pt = pop_pending(key)
 
     if pt is None:
-        await callback.answer("Час вийшов, надішліть посилання ще раз.")
+        await _safe_answer(callback, "Час вийшов, надішліть посилання ще раз.")
         try:
             await callback.message.edit_reply_markup(reply_markup=None)
         except Exception:
@@ -35,7 +44,7 @@ async def on_watermark_choice(callback: CallbackQuery):
     n = len(pt.urls)
 
     # ── instant feedback ──────────────────────────────────────────
-    await callback.answer()
+    await _safe_answer(callback)
     try:
         status = (
             f"⏳ Завантажую відео ({wm_label})..."
