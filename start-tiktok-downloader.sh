@@ -67,7 +67,9 @@ build_binary() {
     # shellcheck source=/dev/null
     . "$VENV/bin/activate"
     rm -rf dist build
-    pyinstaller main.py --onefile --name tiktok-downloader >/dev/null
+    pyinstaller main.py --onefile --name tiktok-downloader \
+        --collect-submodules opentelemetry \
+        >/dev/null
     chmod a+x "$BINARY"
     echo "binary built"
 }
