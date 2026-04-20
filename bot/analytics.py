@@ -4,11 +4,19 @@ import hashlib
 import logging
 import os
 import sqlite3
+import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent / "analytics.db"
+# In pyinstaller bundles __file__ resolves to a temp extraction dir.
+# Use the binary's (or script's) actual directory for persistent data.
+if getattr(sys, 'frozen', False):
+    _BASE_DIR = Path(sys.executable).resolve().parent
+else:
+    _BASE_DIR = Path(__file__).resolve().parent.parent
+
+DB_PATH = _BASE_DIR / "analytics.db"
 
 # Salt is generated once per installation and stored alongside the DB.
 # If the salt file is lost, old hashes become unmatchable — that's fine,
