@@ -33,6 +33,19 @@ async def cmd_stats(message: Message):
         f"Відомих юзерів (для broadcast): <b>{len(recipients)}</b>",
     ]
 
+    wm_yes = stats.get("watermark_yes", 0)
+    wm_no = stats.get("watermark_no", 0)
+    wm_total = wm_yes + wm_no
+    if wm_total > 0:
+        pct_yes = round(wm_yes * 100 / wm_total, 1)
+        pct_no = round(wm_no * 100 / wm_total, 1)
+        lines += [
+            "",
+            "🏷 <b>Ватермарка:</b>",
+            f"  ✅ з: {wm_yes} ({pct_yes}%)",
+            f"  ❌ без: {wm_no} ({pct_no}%)",
+        ]
+
     if stats.get("daily_last_7d"):
         lines += ["", "📅 <b>Останні 7 днів:</b>"]
         for d in stats["daily_last_7d"]:

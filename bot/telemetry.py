@@ -14,10 +14,11 @@ _meter = None
 _download_counter = None
 _video_size_histogram = None
 _error_counter = None
+_watermark_counter = None
 
 
 def _init():
-    global _meter, _download_counter, _video_size_histogram, _error_counter
+    global _meter, _download_counter, _video_size_histogram, _error_counter, _watermark_counter
 
     if not OTEL_ENDPOINT or not OTEL_AUTH_TOKEN:
         logging.info("OTEL not configured — telemetry disabled")
@@ -59,6 +60,11 @@ def _init():
             description="Errors during download or send",
             unit="1",
         )
+        _watermark_counter = _meter.create_counter(
+            name="tiktok.watermark.choices",
+            description="User choices on watermark overlay (yes/no)",
+            unit="1",
+        )
 
         logging.info(f"OTEL telemetry enabled → {OTEL_ENDPOINT}")
 
@@ -83,3 +89,12 @@ def record_failure(chat_type: str, reason: str = "unknown"):
         _download_counter.add(1, {"status": "fail", "chat_type": chat_type})
     if _error_counter:
         _error_counter.add(1, {"reason": reason, "chat_type": chat_type})
+
+
+def record_watermark_choice(with_watermark: bool, chat_type: str):
+    """Record a user's watermark choice at the moment they tap the button."""
+    if _watermark_counter:
+        _watermark_counter.add(
+            1, {"choice": "yes" if with_watermark else "no",
+                "chat_type": chat_type}
+        )

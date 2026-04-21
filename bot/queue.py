@@ -159,13 +159,15 @@ async def _process(task: DownloadTask):
         await send_video(task, content)
         if task.track:
             await analytics.record(task.user_id, task.chat_id, task.chat_type,
-                                   "ok", len(content))
+                                   "ok", len(content),
+                                   watermark=task.with_watermark)
             telemetry.record_download(task.chat_type, len(content))
 
     except Retrying as e:
         logging.warning(f"Could not download video: {e}")
         if task.track:
-            await analytics.record(task.user_id, task.chat_id, task.chat_type, "fail")
+            await analytics.record(task.user_id, task.chat_id, task.chat_type,
+                                   "fail", watermark=task.with_watermark)
             telemetry.record_failure(task.chat_type, "download_failed")
         await _reply_error(task,
                            "Не вдалось завантажити це відео "
@@ -173,7 +175,8 @@ async def _process(task: DownloadTask):
     except BadRequest as e:
         err = str(e)
         if task.track:
-            await analytics.record(task.user_id, task.chat_id, task.chat_type, "error")
+            await analytics.record(task.user_id, task.chat_id, task.chat_type,
+                                   "error", watermark=task.with_watermark)
             telemetry.record_failure(task.chat_type, "send_failed")
         logging.warning(f"Failed to send video: {err}")
         if "Not enough rights" in err:

@@ -1,0 +1,320 @@
+{
+  "apiVersion": "perses.dev/v1alpha1",
+  "kind": "PersesDashboard",
+  "metadata": {
+    "name": "tiktok-downloader"
+  },
+  "spec": {
+    "duration": "24h",
+    "display": {
+      "name": "TikTok Downloader Bot"
+    },
+    "variables": [],
+    "layouts": [
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": { "title": "Overview" },
+          "items": [
+            { "content": { "$ref": "#/spec/panels/total_downloads" },        "x": 0,  "y": 0, "width": 6, "height": 4 },
+            { "content": { "$ref": "#/spec/panels/success_rate" },           "x": 6,  "y": 0, "width": 6, "height": 4 },
+            { "content": { "$ref": "#/spec/panels/total_video_mb" },         "x": 12, "y": 0, "width": 6, "height": 4 },
+            { "content": { "$ref": "#/spec/panels/total_errors" },           "x": 18, "y": 0, "width": 6, "height": 4 }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": { "title": "Rates" },
+          "items": [
+            { "content": { "$ref": "#/spec/panels/downloads_by_status" },    "x": 0,  "y": 0, "width": 12, "height": 8 },
+            { "content": { "$ref": "#/spec/panels/downloads_by_chat_type" }, "x": 12, "y": 0, "width": 12, "height": 8 }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": { "title": "Errors & Sizes" },
+          "items": [
+            { "content": { "$ref": "#/spec/panels/errors_by_reason" },       "x": 0,  "y": 0, "width": 12, "height": 8 },
+            { "content": { "$ref": "#/spec/panels/video_size_percentiles" }, "x": 12, "y": 0, "width": 12, "height": 8 }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": { "title": "Watermark Choices" },
+          "items": [
+            { "content": { "$ref": "#/spec/panels/watermark_ratio" },        "x": 0,  "y": 0, "width": 8,  "height": 4 },
+            { "content": { "$ref": "#/spec/panels/watermark_rate" },         "x": 8,  "y": 0, "width": 16, "height": 8 }
+          ]
+        }
+      }
+    ],
+    "panels": {
+      "total_downloads": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Total Downloads (24h)" },
+          "plugin": {
+            "kind": "StatChart",
+            "spec": { "calculation": "sum", "format": { "unit": "decimal" } }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": { "query": "sum(increase(tiktok_downloads_total[24h]))" }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "success_rate": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Success Rate (24h)" },
+          "plugin": {
+            "kind": "StatChart",
+            "spec": { "calculation": "last", "format": { "unit": "percent" } }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": { "query": "100 * sum(increase(tiktok_downloads_total{status=\"ok\"}[24h])) / sum(increase(tiktok_downloads_total[24h]))" }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "total_video_mb": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Total Video Downloaded (24h)" },
+          "plugin": {
+            "kind": "StatChart",
+            "spec": { "calculation": "sum", "format": { "unit": "bytes" } }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": { "query": "sum(increase(tiktok_video_size_bytes_sum[24h]))" }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "total_errors": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Total Errors (24h)" },
+          "plugin": {
+            "kind": "StatChart",
+            "spec": { "calculation": "sum", "format": { "unit": "decimal" } }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": { "query": "sum(increase(tiktok_errors_total[24h]))" }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "downloads_by_status": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Download Rate by Status" },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": { "position": "bottom", "mode": "list" }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "sum by (status) (rate(tiktok_downloads_total[5m]))",
+                    "seriesNameFormat": "{{status}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "downloads_by_chat_type": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Download Rate by Chat Type" },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": { "position": "bottom", "mode": "list" }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "sum by (chat_type) (rate(tiktok_downloads_total[5m]))",
+                    "seriesNameFormat": "{{chat_type}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "errors_by_reason": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Errors by Reason" },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": { "position": "bottom", "mode": "list" }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "sum by (reason) (rate(tiktok_errors_total[5m]))",
+                    "seriesNameFormat": "{{reason}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "watermark_ratio": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Watermark Choice Ratio (24h)" },
+          "plugin": {
+            "kind": "StatChart",
+            "spec": { "calculation": "last", "format": { "unit": "percent" } }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": { "query": "100 * sum(increase(tiktok_watermark_choices_total{choice=\"yes\"}[24h])) / sum(increase(tiktok_watermark_choices_total[24h]))" }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "watermark_rate": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Watermark Choices Over Time" },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": { "position": "bottom", "mode": "list" }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "sum by (choice) (rate(tiktok_watermark_choices_total[5m]))",
+                    "seriesNameFormat": "{{choice}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "video_size_percentiles": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Video Size Percentiles" },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": { "position": "bottom", "mode": "list" },
+              "yAxis": { "format": { "unit": "bytes" } }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "histogram_quantile(0.50, sum by (le) (rate(tiktok_video_size_bytes_bucket[5m])))",
+                    "seriesNameFormat": "p50"
+                  }
+                }
+              }
+            },
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "histogram_quantile(0.95, sum by (le) (rate(tiktok_video_size_bytes_bucket[5m])))",
+                    "seriesNameFormat": "p95"
+                  }
+                }
+              }
+            },
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "histogram_quantile(0.99, sum by (le) (rate(tiktok_video_size_bytes_bucket[5m])))",
+                    "seriesNameFormat": "p99"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
