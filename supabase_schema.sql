@@ -3,6 +3,8 @@
 -- Run this in Supabase SQL Editor (Dashboard → SQL Editor → New query).
 -- Use the service_role key in .env (Settings → API → service_role) —
 -- it bypasses RLS so no policies are needed.
+--
+-- Safe to re-run: all DDL uses IF NOT EXISTS / CREATE OR REPLACE.
 
 -- ── tables ───────────────────────────────────────────────────────────
 
@@ -13,8 +15,12 @@ CREATE TABLE IF NOT EXISTS events (
     anon_chat   TEXT NOT NULL,
     chat_type   TEXT NOT NULL,
     status      TEXT NOT NULL,
-    video_bytes INTEGER DEFAULT 0
+    video_bytes INTEGER DEFAULT 0,
+    watermark   BOOLEAN
 );
+
+-- Add column to existing deployments that pre-date the watermark flag.
+ALTER TABLE events ADD COLUMN IF NOT EXISTS watermark BOOLEAN;
 
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 CREATE INDEX IF NOT EXISTS idx_events_anon_user ON events(anon_user);
@@ -55,6 +61,8 @@ BEGIN
         'total_video_bytes', COALESCE(
             (SELECT SUM(video_bytes) FROM events WHERE status = 'ok'), 0
         ),
+        'watermark_yes', (SELECT COUNT(*) FROM events WHERE watermark = TRUE),
+        'watermark_no',  (SELECT COUNT(*) FROM events WHERE watermark = FALSE),
         'top_users', COALESCE((
             SELECT json_agg(t) FROM (
                 SELECT anon_user AS anon_id,

@@ -76,7 +76,8 @@ def _get_client() -> httpx.AsyncClient:
 # ── public API ────────────────────────────────────────────────────────
 
 async def record(user_id: int, chat_id: int, chat_type: str,
-                 status: str, video_bytes: int = 0):
+                 status: str, video_bytes: int = 0,
+                 watermark: Optional[bool] = None):
     """Insert one analytics event."""
     if not _configured:
         return
@@ -91,6 +92,7 @@ async def record(user_id: int, chat_id: int, chat_type: str,
                 "chat_type": chat_type,
                 "status": status,
                 "video_bytes": video_bytes,
+                "watermark": watermark,
             },
         )
     except Exception:

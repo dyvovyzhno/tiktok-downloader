@@ -8,9 +8,11 @@ from aiogram.types import CallbackQuery
 from aiogram.utils.exceptions import InvalidQueryID
 
 from bot import dp
+from bot import telemetry
 from bot.queue import (
     pop_pending, enqueue, DownloadTask,
 )
+from settings import ANALYTICS_EXCLUDE_IDS
 
 
 async def _safe_answer(callback: CallbackQuery, text: str = None):
@@ -42,6 +44,12 @@ async def on_watermark_choice(callback: CallbackQuery):
     with_watermark = choice == "y"
     wm_label = "з ватермаркою" if with_watermark else "без ватермарки"
     n = len(pt.urls)
+
+    # Telemetry — record each choice (respects exclude list for consistency
+    # with download events).
+    if pt.user_id not in ANALYTICS_EXCLUDE_IDS:
+        for _ in range(n):
+            telemetry.record_watermark_choice(with_watermark, pt.chat_type)
 
     # ── instant feedback ──────────────────────────────────────────
     await _safe_answer(callback)
