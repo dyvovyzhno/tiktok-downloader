@@ -16,11 +16,15 @@ CREATE TABLE IF NOT EXISTS events (
     chat_type   TEXT NOT NULL,
     status      TEXT NOT NULL,
     video_bytes INTEGER DEFAULT 0,
-    watermark   BOOLEAN
+    watermark   BOOLEAN,
+    url         TEXT,
+    reason      TEXT
 );
 
--- Add column to existing deployments that pre-date the watermark flag.
+-- Add columns to existing deployments that pre-date them.
 ALTER TABLE events ADD COLUMN IF NOT EXISTS watermark BOOLEAN;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS url TEXT;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS reason TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 CREATE INDEX IF NOT EXISTS idx_events_anon_user ON events(anon_user);
@@ -42,6 +46,24 @@ BEGIN
     VALUES (p_chat_id, extract(epoch FROM now()), extract(epoch FROM now()))
     ON CONFLICT (chat_id)
     DO UPDATE SET last_seen = extract(epoch FROM now());
+END;
+$$;
+
+-- Return the last N failed events (for /debug admin command).
+CREATE OR REPLACE FUNCTION get_recent_failures(p_limit INTEGER DEFAULT 10)
+RETURNS JSON
+LANGUAGE plpgsql AS $$
+DECLARE
+    result JSON;
+BEGIN
+    SELECT COALESCE(json_agg(t), '[]'::json) INTO result FROM (
+        SELECT ts, status, chat_type, url, reason, anon_user
+        FROM events
+        WHERE status <> 'ok'
+        ORDER BY ts DESC
+        LIMIT p_limit
+    ) t;
+    RETURN result;
 END;
 $$;
 

@@ -114,12 +114,22 @@ class TikTokAPI:
 
         default_scope = data.get("__DEFAULT_SCOPE__", {})
         video_detail = default_scope.get("webapp.video-detail", {})
-        if video_detail.get("statusCode", 0) != 0:
-            raise Retrying("Invalid response structure in __UNIVERSAL_DATA_FOR_REHYDRATION__")
+        sc = video_detail.get("statusCode", 0)
+        if sc != 0:
+            status_msg = video_detail.get("statusMsg", "") or "?"
+            raise Retrying(
+                f"TikTok statusCode={sc} ({status_msg}) — "
+                f"video likely private/deleted/region-locked"
+            )
 
         video_info = video_detail.get("itemInfo", {}).get("itemStruct")
         if not video_info:
-            raise Retrying("No video information found in __UNIVERSAL_DATA_FOR_REHYDRATION__")
+            # Helpful diagnostic: what keys did TikTok send?
+            keys = list(video_detail.keys())[:5]
+            raise Retrying(
+                f"No itemInfo in video-detail (keys: {keys}) — "
+                f"likely private/deleted/blocked video"
+            )
 
         author = (video_info.get("author", {}) or {}).get("uniqueId")
         video = video_info.get("video", {})
