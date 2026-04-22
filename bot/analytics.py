@@ -77,7 +77,9 @@ def _get_client() -> httpx.AsyncClient:
 
 async def record(user_id: int, chat_id: int, chat_type: str,
                  status: str, video_bytes: int = 0,
-                 watermark: Optional[bool] = None):
+                 watermark: Optional[bool] = None,
+                 url: Optional[str] = None,
+                 reason: Optional[str] = None):
     """Insert one analytics event."""
     if not _configured:
         return
@@ -93,6 +95,8 @@ async def record(user_id: int, chat_id: int, chat_type: str,
                 "status": status,
                 "video_bytes": video_bytes,
                 "watermark": watermark,
+                "url": url,
+                "reason": reason,
             },
         )
     except Exception:
@@ -125,6 +129,22 @@ async def get_broadcast_recipients() -> list[int]:
         return [row["chat_id"] for row in resp.json()]
     except Exception:
         logging.exception("analytics.get_broadcast_recipients failed")
+        return []
+
+
+async def get_recent_failures(limit: int = 10) -> list[dict]:
+    """Return the last N failed events with url/reason for debugging."""
+    if not _configured:
+        return []
+    try:
+        resp = await _get_client().post(
+            "/rest/v1/rpc/get_recent_failures",
+            json={"p_limit": limit},
+        )
+        resp.raise_for_status()
+        return resp.json() or []
+    except Exception:
+        logging.exception("analytics.get_recent_failures failed")
         return []
 
 

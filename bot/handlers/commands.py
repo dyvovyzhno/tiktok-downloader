@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from datetime import datetime
 from aiogram.types import Message
 from aiogram.utils.exceptions import BotBlocked, ChatNotFound, UserDeactivated
 from bot import bot, dp
@@ -60,6 +61,50 @@ async def cmd_stats(message: Message):
             )
 
     await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+def _html_escape(s: str) -> str:
+    return (s.replace("&", "&amp;")
+             .replace("<", "&lt;")
+             .replace(">", "&gt;"))
+
+
+@dp.message_handler(commands=["debug"])
+async def cmd_debug(message: Message):
+    """Show the last N failed downloads (admin only)."""
+    if ADMIN_ID and message.from_user.id != ADMIN_ID:
+        return
+
+    # /debug              → last 10
+    # /debug 20           → last 20
+    args = message.get_args().strip()
+    try:
+        limit = min(int(args), 50) if args else 10
+    except ValueError:
+        limit = 10
+
+    failures = await analytics.get_recent_failures(limit)
+    if not failures:
+        await message.reply("Немає зафіксованих помилок.")
+        return
+
+    lines = [f"🐞 <b>Останні {len(failures)} помилок:</b>", ""]
+    for i, f in enumerate(failures, 1):
+        ts = f.get("ts")
+        when = (datetime.fromtimestamp(ts).strftime("%m-%d %H:%M")
+                if ts else "?")
+        status = f.get("status", "?")
+        url = f.get("url") or "—"
+        reason = f.get("reason") or "—"
+        chat_type = f.get("chat_type", "?")
+        lines.append(
+            f"<b>{i}.</b> [{when}] <code>{status}</code> · {chat_type}\n"
+            f"  URL: <code>{_html_escape(url)}</code>\n"
+            f"  Причина: <i>{_html_escape(reason)}</i>"
+        )
+
+    await message.reply("\n".join(lines), parse_mode="HTML",
+                        disable_web_page_preview=True)
 
 
 @dp.message_handler(commands=["broadcast"])
