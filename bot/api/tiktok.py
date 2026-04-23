@@ -11,7 +11,8 @@ from dataclasses import dataclass
 from typing import AsyncIterator, Optional
 import httpx
 from aiogram.types import Message
-from settings import USER_AGENT
+from bot.overlay import strip_tiktok_outro
+from settings import OUTRO_TRIM_SECONDS, USER_AGENT
 
 class Retrying(Exception):
     pass
@@ -138,7 +139,9 @@ class TikTokAPI:
             f"method 1 (tiktok web downloadAddr): ok — "
             f"bytes={len(video.content)}, author={author}"
         )
-        return TikTokVideo(content=video.content, author=author, has_watermark=True)
+        # TikTok bakes an auto-generated outro (~4s) into downloadAddr MP4s.
+        content = await strip_tiktok_outro(video.content, OUTRO_TRIM_SECONDS)
+        return TikTokVideo(content=content, author=author, has_watermark=True)
 
     async def _primary_via_tikwm(self, client, url):
         logging.info("method 2 (tikwm wmplay): trying")
