@@ -86,7 +86,9 @@ class DownloadTask:
     with_watermark: bool = True
 
 
-_queue: asyncio.Queue = asyncio.Queue()
+# Created in start_workers() so the Queue binds to the running event loop
+# (Python 3.9 asyncio.Queue captures the loop at construction time).
+_queue: asyncio.Queue = None  # type: ignore[assignment]
 _active: int = 0
 
 
@@ -213,6 +215,9 @@ async def _worker(wid: int):
 
 
 async def start_workers(count: Optional[int] = None):
+    global _queue
+    if _queue is None:
+        _queue = asyncio.Queue()
     n = count or MAX_CONCURRENT_DOWNLOADS
     for i in range(n):
         asyncio.create_task(_worker(i + 1))
