@@ -135,4 +135,6 @@ dmypy.json
 .vscode/
 .claude/
 analytics.db
+analytics.db-shm
+analytics.db-wal
 analytics.salt
