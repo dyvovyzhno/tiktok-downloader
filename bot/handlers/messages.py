@@ -26,6 +26,7 @@ def _watermark_keyboard(key: str) -> InlineKeyboardMarkup:
 @dp.channel_post_handler(content_types=["text"])
 async def get_message(message: Message):
     uid = _user_id(message)
+    logging.info(f"msg from {uid} ({message.chat.type}): {(message.text or '')[:80]!r}")
     if message.chat.type == "private":
         await analytics.touch_user(message.chat.id)
     track = uid not in ANALYTICS_EXCLUDE_IDS

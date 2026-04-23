@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from typing import AsyncIterator, Optional
 import httpx
 from aiogram.types import Message
-from bs4 import BeautifulSoup
 from settings import USER_AGENT
 
 class Retrying(Exception):
@@ -22,6 +21,7 @@ class Retrying(Exception):
 class TikTokVideo:
     content: bytes
     author: Optional[str] = None
+    has_watermark: bool = False
 
 def retries(times: int):
     def decorator(func):
@@ -42,10 +42,14 @@ def retries(times: int):
 
 class TikTokAPI:
 
+    TIKWM_ENDPOINT = "https://www.tikwm.com/api/"
+    UNIVERSAL_DATA_MARKER = (
+        '<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">'
+    )
+
     def __init__(self, headers=None):
         self.headers = headers or {}
         self.link = 'tiktok.com'
-        self.script_selector = 'script[id="SIGI_STATE"]'
 
     async def handle_message(self, message: Message) -> AsyncIterator[TikTokVideo]:
         urls = self._extract_urls_from_message(message)
@@ -59,61 +63,23 @@ class TikTokAPI:
             lambda u: u if u.startswith('http') else f'https://{u}',
             filter(lambda e: self.link in e, entries)
         )
-    
-    async def _primary_method(self, soup, client, page_id):
-        script = soup.select_one(self.script_selector)
-        if not script:
-            raise Retrying("No script found with selector.")
 
-        try:
-            data = json.loads(script.text)
-        except json.JSONDecodeError:
-            raise Retrying("Failed to decode JSON from script.")
-
-        modules = tuple(script.get("ItemModule").values())
-        if not modules:
-            raise Retrying("no modules")
-
-        for data in modules:
-            if data["id"] != page_id:
-                raise Retrying("video_id is different from page_id")
-            author = (data.get("author") if isinstance(data.get("author"), str)
-                      else (data.get("author", {}) or {}).get("uniqueId"))
-            for addr_key in ("playAddr", "downloadAddr"):
-                raw = data["video"].get(addr_key)
-                if not raw:
-                    continue
-                link = raw.encode('utf-8').decode('unicode_escape')
-                video = await client.get(link, headers=self._user_agent)
-                video.raise_for_status()
-                if video.content:
-                    return TikTokVideo(content=video.content, author=author)
-        raise Retrying("video not found")
-    
-    async def _secondary_method(self, client, url):
-        response = await client.get(url, headers=self._user_agent)
-        if response.status_code != 200:
-            raise Retrying("Invalid response status code")
-
-        start_marker = '<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">'
-        end_marker = '</script>'
-        start = response.text.find(start_marker)
+    def _parse_universal_data(self, response_text: str) -> dict:
+        """Extract itemStruct from a TikTok page's UNIVERSAL_DATA script tag."""
+        start = response_text.find(self.UNIVERSAL_DATA_MARKER)
         if start == -1:
-            raise Retrying("No __UNIVERSAL_DATA_FOR_REHYDRATION__ script tag found")
-
-        start += len(start_marker)
-        end = response.text.find(end_marker, start)
+            raise Retrying("No UNIVERSAL_DATA script tag (page blocked or changed)")
+        start += len(self.UNIVERSAL_DATA_MARKER)
+        end = response_text.find('</script>', start)
         if end == -1:
-            raise Retrying("Malformed __UNIVERSAL_DATA_FOR_REHYDRATION__ script tag")
+            raise Retrying("Malformed UNIVERSAL_DATA script tag")
 
-        data_json = response.text[start:end]
         try:
-            data = json.loads(data_json)
+            data = json.loads(response_text[start:end])
         except json.JSONDecodeError:
-            raise Retrying("Failed to parse JSON from __UNIVERSAL_DATA_FOR_REHYDRATION__ script tag")
+            raise Retrying("Failed to parse UNIVERSAL_DATA JSON")
 
-        default_scope = data.get("__DEFAULT_SCOPE__", {})
-        video_detail = default_scope.get("webapp.video-detail", {})
+        video_detail = data.get("__DEFAULT_SCOPE__", {}).get("webapp.video-detail", {})
         sc = video_detail.get("statusCode", 0)
         if sc != 0:
             status_msg = video_detail.get("statusMsg", "") or "?"
@@ -122,43 +88,138 @@ class TikTokAPI:
                 f"video likely private/deleted/region-locked"
             )
 
-        video_info = video_detail.get("itemInfo", {}).get("itemStruct")
-        if not video_info:
-            # Helpful diagnostic: what keys did TikTok send?
+        item = video_detail.get("itemInfo", {}).get("itemStruct")
+        if not item:
             keys = list(video_detail.keys())[:5]
             raise Retrying(
                 f"No itemInfo in video-detail (keys: {keys}) — "
                 f"likely private/deleted/blocked video"
             )
+        return item
 
-        author = (video_info.get("author", {}) or {}).get("uniqueId")
-        video = video_info.get("video", {})
+    async def _primary_method(self, client, url):
+        """Fetch TikTok's built-in watermarked MP4.
+
+        Two strategies, in order:
+          1. Parse the web page's UNIVERSAL_DATA and use ``downloadAddr`` (the
+             watermarked variant TikTok itself serves). Zero external deps.
+          2. Fall back to tikwm.com which signs the mobile API for us.
+
+        The watermark is baked into the file by TikTok's CDN, so no ffmpeg
+        overlay is needed downstream. Raises Retrying on total failure so the
+        caller can fall through to the non-watermarked secondary path.
+        """
+        try:
+            return await self._primary_via_web(client, url)
+        except Retrying as e:
+            logging.info(f"method 1 (tiktok web downloadAddr): failed — {e}, trying method 2")
+        return await self._primary_via_tikwm(client, url)
+
+    async def _primary_via_web(self, client, url):
+        logging.info("method 1 (tiktok web downloadAddr): trying")
+        response = await client.get(url, headers=self._user_agent)
+        if response.status_code != 200:
+            raise Retrying(f"page status {response.status_code}")
+
+        item = self._parse_universal_data(response.text)
+        author = (item.get("author") or {}).get("uniqueId")
+        download_addr = (item.get("video") or {}).get("downloadAddr")
+        if not download_addr:
+            raise Retrying("downloadAddr missing in UNIVERSAL_DATA")
+
+        cdn_headers = {"Referer": "https://www.tiktok.com/", **self._user_agent}
+        video = await client.get(download_addr, headers=cdn_headers)
+        if video.status_code != 200 or not video.content:
+            raise Retrying(
+                f"downloadAddr fetch failed "
+                f"(status={video.status_code}, bytes={len(video.content)})"
+            )
+        logging.info(
+            f"method 1 (tiktok web downloadAddr): ok — "
+            f"bytes={len(video.content)}, author={author}"
+        )
+        return TikTokVideo(content=video.content, author=author, has_watermark=True)
+
+    async def _primary_via_tikwm(self, client, url):
+        logging.info("method 2 (tikwm wmplay): trying")
+        try:
+            resp = await client.post(self.TIKWM_ENDPOINT, data={"url": url, "hd": "1"})
+        except httpx.HTTPError as e:
+            raise Retrying(f"tikwm request failed: {e}")
+
+        if resp.status_code != 200:
+            raise Retrying(f"tikwm api status {resp.status_code}")
+        try:
+            payload = resp.json()
+        except ValueError:
+            raise Retrying("tikwm non-JSON response")
+
+        if payload.get("code") != 0:
+            raise Retrying(f"tikwm code={payload.get('code')} msg={payload.get('msg')}")
+
+        data = payload.get("data") or {}
+        wm_url = data.get("wmplay")
+        if not wm_url:
+            raise Retrying("tikwm wmplay missing")
+        # tikwm returns the same URL for wmplay and play when TikTok has no
+        # separate watermarked variant — the file is unwatermarked despite the
+        # field name. Detect this so we fall through to secondary + overlay.
+        if wm_url == data.get("play"):
+            raise Retrying("tikwm wmplay equals play (no watermarked variant)")
+
+        author = (data.get("author") or {}).get("unique_id")
+        cdn_headers = {"Referer": "https://www.tiktok.com/", **self._user_agent}
+        video = await client.get(wm_url, headers=cdn_headers)
+        if video.status_code != 200 or not video.content:
+            raise Retrying(
+                f"tikwm wmplay fetch failed "
+                f"(status={video.status_code}, bytes={len(video.content)})"
+            )
+        logging.info(
+            f"method 2 (tikwm wmplay): ok — "
+            f"bytes={len(video.content)}, author={author}"
+        )
+        return TikTokVideo(content=video.content, author=author, has_watermark=True)
+
+    async def _secondary_method(self, client, url):
+        logging.info("method 3 (tiktok web no-watermark): trying")
+        response = await client.get(url, headers=self._user_agent)
+        if response.status_code != 200:
+            raise Retrying("Invalid response status code")
+
+        item = self._parse_universal_data(response.text)
+        author = (item.get("author", {}) or {}).get("uniqueId")
+        video = item.get("video", {})
+        cdn_headers = {"Referer": "https://www.tiktok.com/", **self._user_agent}
         for addr_key in ("playAddr", "downloadAddr"):
             download_link = video.get(addr_key)
             if not download_link:
                 continue
-            video_response = await client.get(download_link, headers=self._user_agent)
+            video_response = await client.get(download_link, headers=cdn_headers)
             if video_response.status_code != 200 or not video_response.content:
                 continue
+            logging.info(
+                f"method 3 (tiktok web no-watermark): ok — "
+                f"addr={addr_key}, bytes={len(video_response.content)}, author={author}"
+            )
             return TikTokVideo(content=video_response.content, author=author)
 
         raise Retrying("No working video link found")
 
 
     @retries(times=3)
-    async def download_video(self, url: str) -> TikTokVideo:
+    async def download_video(self, url: str, prefer_watermarked: bool = False) -> TikTokVideo:
         async with httpx.AsyncClient(headers=self.headers, timeout=30,
                                     cookies=self._tt_webid_v2, follow_redirects=True) as client:
-            page = await client.get(url, headers=self._user_agent)
-            page.raise_for_status()  # Ensure the page is loaded correctly
-            page_id = page.url.path.rsplit('/', 1)[-1]
-            soup = BeautifulSoup(page.text, 'html.parser')
-
-            try:
-                return await self._primary_method(soup, client, page_id)
-            except Retrying as primary_error:
-                logging.info(f"Primary method failed: {primary_error}, attempting secondary method.")
-                return await self._secondary_method(client, url)
+            if prefer_watermarked:
+                try:
+                    return await self._primary_method(client, url)
+                except Retrying as primary_error:
+                    logging.info(
+                        f"method 2 (tikwm wmplay): failed — {primary_error}, "
+                        f"trying method 3"
+                    )
+            return await self._secondary_method(client, url)
 
     @property
     def _user_agent(self) -> dict:

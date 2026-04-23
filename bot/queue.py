@@ -147,11 +147,12 @@ async def _process(task: DownloadTask):
     try:
         _cleanup_stale()
 
-        video = await _tiktok.download_video(task.url)
+        video = await _tiktok.download_video(task.url, prefer_watermarked=task.with_watermark)
         if not video or not video.content:
             return
 
-        if task.with_watermark and video.author:
+        if task.with_watermark and video.author and not video.has_watermark:
+            logging.info(f"applying ffmpeg @author overlay for @{video.author}")
             content = await add_author_overlay(video.content, video.author)
         else:
             content = video.content
