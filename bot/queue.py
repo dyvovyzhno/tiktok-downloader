@@ -76,6 +76,18 @@ def _cleanup_stale():
 
 
 @dataclass
+class StatusMessage:
+    """Shared reference to the "⏳ Завантажую..." status message.
+
+    A single status message covers every URL in a batch, so `remaining`
+    is decremented by each task; the message is deleted when it hits 0.
+    """
+    chat_id: int
+    message_id: int
+    remaining: int
+
+
+@dataclass
 class DownloadTask:
     url: str
     message: Message
@@ -84,6 +96,7 @@ class DownloadTask:
     chat_type: str
     track: bool
     with_watermark: bool = True
+    status: Optional[StatusMessage] = None
 
 
 # Created in start_workers() so the Queue binds to the running event loop
@@ -200,6 +213,16 @@ async def _process(task: DownloadTask):
                 "An error occurred while trying to send a video.")
     finally:
         _active -= 1
+        if task.status is not None:
+            task.status.remaining -= 1
+            if task.status.remaining <= 0:
+                try:
+                    await bot.delete_message(
+                        task.status.chat_id,
+                        task.status.message_id,
+                    )
+                except Exception:
+                    pass
 
 
 async def _worker(wid: int):
