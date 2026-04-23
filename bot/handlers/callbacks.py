@@ -10,7 +10,7 @@ from aiogram.utils.exceptions import InvalidQueryID
 from bot import dp
 from bot import telemetry
 from bot.queue import (
-    pop_pending, enqueue, DownloadTask,
+    pop_pending, enqueue, DownloadTask, StatusMessage,
 )
 from settings import ANALYTICS_EXCLUDE_IDS
 
@@ -64,6 +64,11 @@ async def on_watermark_choice(callback: CallbackQuery):
         pass
 
     # ── queue the download(s) ─────────────────────────────────────
+    status_ref = StatusMessage(
+        chat_id=callback.message.chat.id,
+        message_id=callback.message.message_id,
+        remaining=n,
+    )
     for url in pt.urls:
         await enqueue(DownloadTask(
             url=url,
@@ -73,4 +78,5 @@ async def on_watermark_choice(callback: CallbackQuery):
             chat_type=pt.chat_type,
             track=pt.track,
             with_watermark=with_watermark,
+            status=status_ref,
         ))
