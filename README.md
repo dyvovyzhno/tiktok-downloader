@@ -64,6 +64,20 @@ The script creates a venv, installs dependencies, builds a PyInstaller binary an
 | `-s` | Stop the bot |
 | `-h` | Show help |
 
+## Local Development
+
+For day-to-day development, skip the PyInstaller build and run `main.py` directly — it picks up code changes on the next restart without a rebuild.
+
+Use a **separate Telegram bot token** for local runs so you don't intercept updates intended for production. Create one with [@BotFather](https://t.me/BotFather) and put it in `.env` as `API_TOKEN`.
+
+```bash
+python3 -m venv venv
+./venv/bin/pip install -r requirements.txt
+./venv/bin/python main.py
+```
+
+Stop with `Ctrl+C`. Logs go to stdout.
+
 ## Built With
 
 - [aiogram](https://github.com/aiogram/aiogram) 2.19 — Telegram Bot framework
