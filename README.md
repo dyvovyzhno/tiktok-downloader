@@ -2,6 +2,18 @@
 
 Telegram bot that downloads TikTok videos. Share a link in any chat where the bot is present — it will reply with the video. No commands needed.
 
+## Table of Contents
+
+- [Features](#features)
+- [Environment Variables](#environment-variables)
+  - [Required](#required)
+  - [Optional](#optional)
+- [Supabase Setup](#supabase-setup)
+- [Installation](#installation)
+  - [Deploy Script Flags](#deploy-script-flags)
+- [Local Development](#local-development)
+- [Built With](#built-with)
+
 ## Features
 
 - Automatic TikTok link detection (works in private chats, groups and channels)
