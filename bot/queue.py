@@ -11,13 +11,15 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass
 from typing import Optional
 
-from aiogram.types import Message
+from aiogram.types import InputFile, Message
 from aiogram.utils.exceptions import RetryAfter, BadRequest
 
 from bot import bot
@@ -129,11 +131,17 @@ def extract_urls(message: Message) -> list[str]:
 
 # ── worker logic ─────────────────────────────────────────────────────
 
-async def send_video(task: DownloadTask, content: bytes):
+def _build_video_file(content: bytes, author: Optional[str]) -> InputFile:
+    safe_author = re.sub(r"[^A-Za-z0-9_.-]+", "_", author).strip("_") if author else ""
+    filename = f"tiktok_{safe_author}.mp4" if safe_author else "tiktok.mp4"
+    return InputFile(io.BytesIO(content), filename=filename)
+
+
+async def send_video(task: DownloadTask, content: bytes, author: Optional[str] = None):
     try:
         await bot.send_video(
             task.chat_id,
-            content,
+            _build_video_file(content, author),
             reply_to_message_id=task.message.message_id,
         )
     except RetryAfter as e:
@@ -141,7 +149,7 @@ async def send_video(task: DownloadTask, content: bytes):
         await asyncio.sleep(int(e.timeout))
         await bot.send_video(
             task.chat_id,
-            content,
+            _build_video_file(content, author),
             reply_to_message_id=task.message.message_id,
         )
 
@@ -172,7 +180,7 @@ async def _process(task: DownloadTask):
         else:
             content = video.content
 
-        await send_video(task, content)
+        await send_video(task, content, author=video.author)
         if task.track:
             await analytics.record(task.user_id, task.chat_id, task.chat_type,
                                    "ok", len(content),
