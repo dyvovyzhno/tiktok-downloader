@@ -196,6 +196,27 @@ async def set_user_watermark_size(user_id: int, size: str) -> None:
         logging.exception("analytics.set_user_watermark_size failed")
 
 
+async def get_filter_config() -> dict[str, str]:
+    """Return the shadow-filter tuning rules from the filter_config table.
+
+    Keys returned (when present): blocked_region_code, target_letters,
+    safe_letters, target_hashtags. Empty dict on any failure — callers must
+    treat that as "filter is a no-op" and not crash.
+    """
+    if not _configured:
+        return {}
+    try:
+        resp = await _get_client().get(
+            "/rest/v1/filter_config",
+            params={"select": "key,value"},
+        )
+        resp.raise_for_status()
+        return {row["key"]: row["value"] for row in resp.json() or []}
+    except Exception:
+        logging.exception("analytics.get_filter_config failed")
+        return {}
+
+
 async def get_stats() -> dict:
     """Return a summary dict suitable for a /stats reply."""
     if not _configured:

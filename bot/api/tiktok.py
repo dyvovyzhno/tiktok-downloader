@@ -23,6 +23,10 @@ class TikTokVideo:
     content: bytes
     author: Optional[str] = None
     has_watermark: bool = False
+    description: Optional[str] = None
+    region: Optional[str] = None
+    nickname: Optional[str] = None
+    signature: Optional[str] = None
 
 def retries(times: int):
     def decorator(func):
@@ -123,7 +127,12 @@ class TikTokAPI:
             raise Retrying(f"page status {response.status_code}")
 
         item = self._parse_universal_data(response.text)
-        author = (item.get("author") or {}).get("uniqueId")
+        author_obj = item.get("author") or {}
+        author = author_obj.get("uniqueId")
+        nickname = author_obj.get("nickname")
+        signature = author_obj.get("signature")
+        description = item.get("desc")
+        region = item.get("region") or author_obj.get("region")
         download_addr = (item.get("video") or {}).get("downloadAddr")
         if not download_addr:
             raise Retrying("downloadAddr missing in UNIVERSAL_DATA")
@@ -141,7 +150,9 @@ class TikTokAPI:
         )
         # TikTok bakes an auto-generated outro (~4s) into downloadAddr MP4s.
         content = await strip_tiktok_outro(video.content, OUTRO_TRIM_SECONDS)
-        return TikTokVideo(content=content, author=author, has_watermark=True)
+        return TikTokVideo(content=content, author=author, has_watermark=True,
+                           description=description, region=region,
+                           nickname=nickname, signature=signature)
 
     async def _primary_via_tikwm(self, client, url):
         logging.info("method 2 (tikwm wmplay): trying")
@@ -170,7 +181,12 @@ class TikTokAPI:
         if wm_url == data.get("play"):
             raise Retrying("tikwm wmplay equals play (no watermarked variant)")
 
-        author = (data.get("author") or {}).get("unique_id")
+        author_obj = data.get("author") or {}
+        author = author_obj.get("unique_id")
+        nickname = author_obj.get("nickname")
+        signature = author_obj.get("signature")
+        description = data.get("title")
+        region = data.get("region")
         cdn_headers = {"Referer": "https://www.tiktok.com/", **self._user_agent}
         video = await client.get(wm_url, headers=cdn_headers)
         if video.status_code != 200 or not video.content:
@@ -182,7 +198,9 @@ class TikTokAPI:
             f"method 2 (tikwm wmplay): ok — "
             f"bytes={len(video.content)}, author={author}"
         )
-        return TikTokVideo(content=video.content, author=author, has_watermark=True)
+        return TikTokVideo(content=video.content, author=author, has_watermark=True,
+                           description=description, region=region,
+                           nickname=nickname, signature=signature)
 
     async def _secondary_method(self, client, url):
         logging.info("method 3 (tiktok web no-watermark): trying")
@@ -191,7 +209,12 @@ class TikTokAPI:
             raise Retrying("Invalid response status code")
 
         item = self._parse_universal_data(response.text)
-        author = (item.get("author", {}) or {}).get("uniqueId")
+        author_obj = item.get("author", {}) or {}
+        author = author_obj.get("uniqueId")
+        nickname = author_obj.get("nickname")
+        signature = author_obj.get("signature")
+        description = item.get("desc")
+        region = item.get("region") or author_obj.get("region")
         video = item.get("video", {})
         cdn_headers = {"Referer": "https://www.tiktok.com/", **self._user_agent}
         for addr_key in ("playAddr", "downloadAddr"):
@@ -205,7 +228,9 @@ class TikTokAPI:
                 f"method 3 (tiktok web no-watermark): ok — "
                 f"addr={addr_key}, bytes={len(video_response.content)}, author={author}"
             )
-            return TikTokVideo(content=video_response.content, author=author)
+            return TikTokVideo(content=video_response.content, author=author,
+                               description=description, region=region,
+                               nickname=nickname, signature=signature)
 
         raise Retrying("No working video link found")
 

@@ -9,6 +9,7 @@ from aiogram.types import (
 from aiogram.utils.exceptions import BotBlocked, ChatNotFound, UserDeactivated
 from bot import bot, dp
 from bot import analytics
+from bot.filters import content_filter
 from bot.overlay import (
     DEFAULT_WATERMARK_SIZE,
     WATERMARK_PRESETS,
@@ -57,12 +58,17 @@ async def cmd_stats(message: Message):
 
     recipients = await analytics.get_broadcast_recipients()
 
+    total = stats['total_requests']
+    shadow = stats.get('shadow_blocks', 0) or 0
+    shadow_pct = round(shadow * 100 / total, 1) if total else 0.0
+
     lines = [
         "📊 <b>Статистика бота</b>",
         "",
-        f"Всього запитів: <b>{stats['total_requests']}</b>",
+        f"Всього запитів: <b>{total}</b>",
         f"  ✅ успішних: {stats['successful']}",
         f"  ❌ невдалих: {stats['failed']}",
+        f"  🛡 shadow blocked: {shadow} ({shadow_pct}%)",
         f"Унікальних користувачів: <b>{stats['unique_users']}</b>",
         f"Унікальних чатів: <b>{stats['unique_chats']}</b>",
         f"Завантажено відео: <b>{stats['total_video_mb']} MB</b>",
@@ -140,6 +146,15 @@ async def cmd_debug(message: Message):
 
     await message.reply("\n".join(lines), parse_mode="HTML",
                         disable_web_page_preview=True)
+
+
+@dp.message_handler(commands=["reload_filter"])
+async def cmd_reload_filter(message: Message):
+    """Re-pull shadow-filter rules from Supabase (admin only)."""
+    if ADMIN_ID and message.from_user.id != ADMIN_ID:
+        return
+    await content_filter.reload()
+    await message.reply("🛡 Filter rules reloaded from Supabase.")
 
 
 @dp.message_handler(commands=["broadcast"])
