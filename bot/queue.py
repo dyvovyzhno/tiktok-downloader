@@ -24,7 +24,7 @@ from aiogram.utils.exceptions import RetryAfter, BadRequest
 
 from bot import bot
 from bot.api.tiktok import TikTokAPI, Retrying
-from bot.overlay import add_author_overlay
+from bot.overlay import add_author_overlay, DEFAULT_WATERMARK_SIZE
 from bot import analytics
 from bot import telemetry
 from settings import MAX_CONCURRENT_DOWNLOADS
@@ -89,6 +89,9 @@ class StatusMessage:
     remaining: int
 
 
+WATERMARK_MODES = ("tt", "custom", "none")
+
+
 @dataclass
 class DownloadTask:
     url: str
@@ -97,7 +100,12 @@ class DownloadTask:
     chat_id: int
     chat_type: str
     track: bool
-    with_watermark: bool = True
+    # "tt"     — prefer TikTok's own watermark (fall back to custom overlay
+    #            if the watermarked stream isn't available)
+    # "custom" — strip TikTok watermark, burn our @author overlay on top
+    # "none"   — clean video, no watermark
+    watermark_mode: str = "tt"
+    watermark_size: str = DEFAULT_WATERMARK_SIZE
     status: Optional[StatusMessage] = None
 
 
@@ -170,28 +178,45 @@ async def _process(task: DownloadTask):
     try:
         _cleanup_stale()
 
-        video = await _tiktok.download_video(task.url, prefer_watermarked=task.with_watermark)
+        prefer_tt = task.watermark_mode == "tt"
+        video = await _tiktok.download_video(task.url, prefer_watermarked=prefer_tt)
         if not video or not video.content:
             return
 
-        if task.with_watermark and video.author and not video.has_watermark:
-            logging.info(f"applying ffmpeg @author overlay for @{video.author}")
-            content = await add_author_overlay(video.content, video.author)
+        # Apply our custom overlay when:
+        #  - mode is "custom" (always), or
+        #  - mode is "tt" but TikTok's watermarked version wasn't available.
+        # "none" never overlays.
+        should_overlay = (
+            task.watermark_mode == "custom"
+            or (task.watermark_mode == "tt" and not video.has_watermark)
+        )
+        if should_overlay and video.author:
+            logging.info(
+                f"applying ffmpeg @author overlay for @{video.author} "
+                f"(mode={task.watermark_mode}, size={task.watermark_size})"
+            )
+            content = await add_author_overlay(
+                video.content, video.author, task.watermark_size,
+            )
         else:
             content = video.content
+
+        any_watermark = task.watermark_mode != "none"
 
         await send_video(task, content, author=video.author)
         if task.track:
             await analytics.record(task.user_id, task.chat_id, task.chat_type,
                                    "ok", len(content),
-                                   watermark=task.with_watermark)
+                                   watermark=any_watermark)
             telemetry.record_download(task.chat_type, len(content))
 
     except Retrying as e:
         logging.warning(f"Could not download video: {e} | url={task.url}")
         if task.track:
             await analytics.record(task.user_id, task.chat_id, task.chat_type,
-                                   "fail", watermark=task.with_watermark,
+                                   "fail",
+                                   watermark=task.watermark_mode != "none",
                                    url=task.url, reason=str(e))
             telemetry.record_failure(task.chat_type, "download_failed")
         await _reply_error(task,
@@ -201,7 +226,8 @@ async def _process(task: DownloadTask):
         err = str(e)
         if task.track:
             await analytics.record(task.user_id, task.chat_id, task.chat_type,
-                                   "error", watermark=task.with_watermark,
+                                   "error",
+                                   watermark=task.watermark_mode != "none",
                                    url=task.url, reason=err)
             telemetry.record_failure(task.chat_type, "send_failed")
         logging.warning(f"Failed to send video: {err}")

@@ -3,11 +3,46 @@
 import asyncio
 import logging
 from datetime import datetime
-from aiogram.types import Message
+from aiogram.types import (
+    Message, InlineKeyboardMarkup, InlineKeyboardButton,
+)
 from aiogram.utils.exceptions import BotBlocked, ChatNotFound, UserDeactivated
 from bot import bot, dp
 from bot import analytics
+from bot.overlay import (
+    DEFAULT_WATERMARK_SIZE,
+    WATERMARK_PRESETS,
+    WATERMARK_SIZE_LABELS_SHORT,
+    WATERMARK_SIZE_LABELS_UA,
+)
 from settings import ADMIN_ID
+
+
+def _watermark_size_keyboard(current: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup(row_width=1)
+    for key in WATERMARK_PRESETS:
+        prefix = "✓ " if key == current else ""
+        kb.add(InlineKeyboardButton(
+            f"{prefix}{WATERMARK_SIZE_LABELS_UA[key]} ({WATERMARK_SIZE_LABELS_SHORT[key]})",
+            callback_data=f"wms:{key}",
+        ))
+    return kb
+
+
+@dp.message_handler(commands=["watermark_size"])
+async def cmd_watermark_size(message: Message):
+    """Let the user pick the size used for the custom @author overlay."""
+    uid = message.from_user.id if message.from_user else message.chat.id
+    saved = await analytics.get_user_watermark_size(uid)
+    if saved not in WATERMARK_PRESETS:
+        saved = DEFAULT_WATERMARK_SIZE
+
+    await message.reply(
+        "Оберіть розмір своєї ватермарки.\n"
+        f"Поточний: <b>{WATERMARK_SIZE_LABELS_UA[saved]}</b>",
+        parse_mode="HTML",
+        reply_markup=_watermark_size_keyboard(saved),
+    )
 
 
 @dp.message_handler(commands=["stats"])

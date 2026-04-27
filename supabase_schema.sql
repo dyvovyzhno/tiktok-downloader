@@ -35,6 +35,15 @@ CREATE TABLE IF NOT EXISTS known_users (
     last_seen   DOUBLE PRECISION NOT NULL
 );
 
+-- Per-user settings. Keyed by the same hashed anon_user used in `events` so
+-- prefs survive only as long as the local analytics.salt does — same trade-off
+-- as everything else here.
+CREATE TABLE IF NOT EXISTS user_preferences (
+    anon_user      TEXT PRIMARY KEY,
+    watermark_size TEXT NOT NULL DEFAULT 'small'
+        CHECK (watermark_size IN ('tiny','small','medium','large','xl'))
+);
+
 -- ── functions ────────────────────────────────────────────────────────
 
 -- Upsert: insert new user or update last_seen (keeps first_seen intact).
