@@ -21,6 +21,11 @@ SUPABASE_KEY = config('SUPABASE_KEY', default='')
 # Download queue
 MAX_CONCURRENT_DOWNLOADS = config('MAX_CONCURRENT_DOWNLOADS', default=2, cast=int)
 
+# Shadow-restrict downloads of Russian-origin TikToks. When triggered, the user
+# sees the same generic "private/deleted" failure message after a small delay,
+# making the filter indistinguishable from real failures. Set to 0 to disable.
+SHADOW_FILTER_ENABLED = config('SHADOW_FILTER_ENABLED', default=1, cast=int) == 1
+
 # Fallback trim length (seconds) used when outro detection fails on a method-1
 # download. 0 = no fallback (trust detection). Only raise this if you see
 # outros slipping through; non-zero risks over-trimming no-outro videos.

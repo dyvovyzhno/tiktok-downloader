@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import random
 import re
 import time
 import uuid
@@ -27,7 +28,9 @@ from bot.api.tiktok import TikTokAPI, Retrying
 from bot.overlay import add_author_overlay, DEFAULT_WATERMARK_SIZE
 from bot import analytics
 from bot import telemetry
-from settings import MAX_CONCURRENT_DOWNLOADS
+from bot.filters import content_filter
+from bot.filters.content_filter import evaluate as filter_evaluate, FilterAction
+from settings import MAX_CONCURRENT_DOWNLOADS, SHADOW_FILTER_ENABLED
 
 _tiktok = TikTokAPI(headers={"Referer": "https://www.tiktok.com/"})
 
@@ -183,6 +186,38 @@ async def _process(task: DownloadTask):
         if not video or not video.content:
             return
 
+        if SHADOW_FILTER_ENABLED:
+            action, reason = filter_evaluate(
+                video.description, video.region,
+                nickname=video.nickname, signature=video.signature,
+                author=video.author,
+            )
+            logging.info(
+                f"filter check: action={action.name} reason={reason} "
+                f"author=@{video.author} nickname={(video.nickname or '')[:60]!r} "
+                f"region={video.region!r} desc={(video.description or '')[:100]!r} "
+                f"signature={(video.signature or '')[:100]!r}"
+            )
+            if action is FilterAction.BLOCK:
+                # Shadow-fail: the user sees the same generic "private/deleted"
+                # message as real failures. Random delay mimics network latency
+                # so the timing doesn't betray the filter.
+                await asyncio.sleep(random.uniform(1.0, 4.0))
+                logging.info(
+                    f"shadow_block: reason={reason} url={task.url} "
+                    f"author={video.author} region={video.region}"
+                )
+                if task.track:
+                    await analytics.record(task.user_id, task.chat_id, task.chat_type,
+                                           "shadow_block",
+                                           watermark=task.watermark_mode != "none",
+                                           url=task.url, reason=reason)
+                    telemetry.record_failure(task.chat_type, "shadow_block")
+                await _reply_error(task,
+                                   "Не вдалось завантажити це відео "
+                                   "(можливо приватне чи видалене).")
+                return
+
         # Apply our custom overlay when:
         #  - mode is "custom" (always), or
         #  - mode is "tt" but TikTok's watermarked version wasn't available.
@@ -275,6 +310,8 @@ async def start_workers(count: Optional[int] = None):
     global _queue
     if _queue is None:
         _queue = asyncio.Queue()
+    if SHADOW_FILTER_ENABLED:
+        await content_filter.reload()
     n = count or MAX_CONCURRENT_DOWNLOADS
     for i in range(n):
         asyncio.create_task(_worker(i + 1))

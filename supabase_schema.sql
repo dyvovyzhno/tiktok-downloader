@@ -44,6 +44,24 @@ CREATE TABLE IF NOT EXISTS user_preferences (
         CHECK (watermark_size IN ('tiny','small','medium','large','xl'))
 );
 
+-- Tunable rules for the shadow content filter (bot/filters/content_filter.py).
+-- Source of truth lives here, not in code, so the active rules don't ship with
+-- the repo. Update via Dashboard → SQL Editor:
+--   UPDATE filter_config SET value = '...' WHERE key = '...';
+-- Then run /reload_filter from the admin Telegram chat (or restart the bot).
+CREATE TABLE IF NOT EXISTS filter_config (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
+
+-- Seed empty rows so the bot can always do an UPDATE later.
+INSERT INTO filter_config (key, value) VALUES
+    ('blocked_region_code', ''),
+    ('target_letters',      ''),
+    ('safe_letters',        ''),
+    ('target_hashtags',     '')
+ON CONFLICT (key) DO NOTHING;
+
 -- ── functions ────────────────────────────────────────────────────────
 
 -- Upsert: insert new user or update last_seen (keeps first_seen intact).
@@ -87,6 +105,7 @@ BEGIN
         'total_requests',   (SELECT COUNT(*) FROM events),
         'successful',       (SELECT COUNT(*) FROM events WHERE status = 'ok'),
         'failed',           (SELECT COUNT(*) FROM events WHERE status <> 'ok'),
+        'shadow_blocks',    (SELECT COUNT(*) FROM events WHERE status = 'shadow_block'),
         'unique_users',     (SELECT COUNT(DISTINCT anon_user) FROM events),
         'unique_chats',     (SELECT COUNT(DISTINCT anon_chat) FROM events),
         'total_video_bytes', COALESCE(
