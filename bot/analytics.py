@@ -148,6 +148,54 @@ async def get_recent_failures(limit: int = 10) -> list[dict]:
         return []
 
 
+# In-memory fallback for local dev when Supabase isn't configured.
+# Lost on restart; production uses the user_preferences table.
+_local_prefs: dict[int, str] = {}
+
+
+async def get_user_watermark_size(user_id: int) -> Optional[str]:
+    """Return the user's saved watermark preset key, or None if not set."""
+    if not _configured:
+        return _local_prefs.get(user_id)
+    try:
+        resp = await _get_client().get(
+            "/rest/v1/user_preferences",
+            params={
+                "anon_user": f"eq.{_hash_id(user_id)}",
+                "select": "watermark_size",
+                "limit": 1,
+            },
+        )
+        resp.raise_for_status()
+        rows = resp.json()
+        if rows:
+            return rows[0].get("watermark_size")
+        return None
+    except Exception:
+        logging.exception("analytics.get_user_watermark_size failed")
+        return None
+
+
+async def set_user_watermark_size(user_id: int, size: str) -> None:
+    """Upsert the user's watermark preset key."""
+    if not _configured:
+        _local_prefs[user_id] = size
+        return
+    try:
+        await _get_client().post(
+            "/rest/v1/user_preferences",
+            headers={
+                "Prefer": "return=minimal,resolution=merge-duplicates",
+            },
+            json={
+                "anon_user": _hash_id(user_id),
+                "watermark_size": size,
+            },
+        )
+    except Exception:
+        logging.exception("analytics.set_user_watermark_size failed")
+
+
 async def get_stats() -> dict:
     """Return a summary dict suitable for a /stats reply."""
     if not _configured:

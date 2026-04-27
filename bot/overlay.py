@@ -9,6 +9,35 @@ import tempfile
 from typing import Optional
 
 
+# Watermark size presets — each value is the divisor used in FFmpeg drawtext
+# `fontsize=h/N` (so larger N = smaller text). Bounds chosen so the smallest
+# remains legible on 720p video and the largest does not dominate the frame.
+WATERMARK_PRESETS: dict[str, int] = {
+    "tiny": 70,
+    "small": 54,
+    "medium": 43,
+    "large": 35,
+    "xl": 29,
+}
+DEFAULT_WATERMARK_SIZE = "small"
+
+# UI metadata for the size presets (kept next to the divisors so they stay in sync).
+WATERMARK_SIZE_LABELS_UA: dict[str, str] = {
+    "tiny": "Крихітна",
+    "small": "Маленька",
+    "medium": "Середня",
+    "large": "Велика",
+    "xl": "Дуже велика",
+}
+WATERMARK_SIZE_LABELS_SHORT: dict[str, str] = {
+    "tiny": "XS",
+    "small": "S",
+    "medium": "M",
+    "large": "L",
+    "xl": "XL",
+}
+
+
 def _escape_drawtext(text: str) -> str:
     return (
         text.replace("\\", "\\\\")
@@ -193,15 +222,17 @@ async def strip_tiktok_outro(video_bytes: bytes,
             pass
 
 
-async def add_author_overlay(video_bytes: bytes, author: str) -> bytes:
+async def add_author_overlay(video_bytes: bytes, author: str,
+                              size: str = DEFAULT_WATERMARK_SIZE) -> bytes:
     if not author or not shutil.which("ffmpeg"):
         return video_bytes
 
+    divisor = WATERMARK_PRESETS.get(size, WATERMARK_PRESETS[DEFAULT_WATERMARK_SIZE])
     text = _escape_drawtext(f"@{author}")
     vf = (
         f"drawtext=text='{text}'"
         ":fontcolor=white@0.85"
-        ":fontsize=h/27"
+        f":fontsize=h/{divisor}"
         ":borderw=2:bordercolor=black@0.6"
         ":x=w-tw-20:y=h-th-20"
     )
