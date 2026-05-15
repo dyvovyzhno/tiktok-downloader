@@ -12,7 +12,7 @@ from typing import AsyncIterator, Optional
 import httpx
 from aiogram.types import Message
 from bot.overlay import strip_tiktok_outro
-from settings import OUTRO_TRIM_SECONDS, USER_AGENT
+from settings import USER_AGENT
 
 class Retrying(Exception):
     pass
@@ -133,9 +133,14 @@ class TikTokAPI:
         signature = author_obj.get("signature")
         description = item.get("desc")
         region = item.get("region") or author_obj.get("region")
-        download_addr = (item.get("video") or {}).get("downloadAddr")
+        video_obj = item.get("video") or {}
+        download_addr = video_obj.get("downloadAddr")
         if not download_addr:
             raise Retrying("downloadAddr missing in UNIVERSAL_DATA")
+        raw_duration = video_obj.get("duration")
+        content_duration = (
+            float(raw_duration) if isinstance(raw_duration, (int, float)) else None
+        )
 
         cdn_headers = {"Referer": "https://www.tiktok.com/", **self._user_agent}
         video = await client.get(download_addr, headers=cdn_headers)
@@ -148,8 +153,9 @@ class TikTokAPI:
             f"method 1 (tiktok web downloadAddr): ok — "
             f"bytes={len(video.content)}, author={author}"
         )
-        # TikTok bakes an auto-generated outro (~4s) into downloadAddr MP4s.
-        content = await strip_tiktok_outro(video.content, OUTRO_TRIM_SECONDS)
+        # TikTok bakes an auto-generated outro into downloadAddr MP4s; strip it
+        # using the clip's true length reported in the page metadata.
+        content = await strip_tiktok_outro(video.content, content_duration)
         return TikTokVideo(content=content, author=author, has_watermark=True,
                            description=description, region=region,
                            nickname=nickname, signature=signature)

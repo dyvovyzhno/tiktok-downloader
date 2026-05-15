@@ -73,20 +73,24 @@ async def _probe_duration(path: str) -> Optional[float]:
         return None
 
 
-async def _detect_outro_start(path: str, duration: float) -> Optional[float]:
-    """Find the TikTok outro boundary in ``path``.
+# How far on either side of TikTok's reported content duration we look for the
+# exact outro splice keyframe. The metadata is integer-rounded, so the true
+# splice sits within ~1s of it; the margin covers that plus probe slack.
+_OUTRO_SEARCH_MARGIN = 1.5
 
-    TikTok concatenates the outro onto the user's clip and inserts a keyframe
-    at the splice point; the frame itself is a strong scene change (the
-    outro's first frame is visually unrelated to the content). We run ffmpeg
-    with the scene filter + showinfo, then pick the latest keyframe scene
-    change that falls into the expected tail window (2.0–5.5s from end).
-    Returns None if nothing matches.
+
+async def _detect_outro_splice(path: str,
+                               content_duration: float) -> Optional[float]:
+    """Refine the outro splice point near ``content_duration``.
+
+    TikTok's metadata already tells us the real clip runs ~content_duration;
+    the outro begins at that splice with a hard scene change and an inserted
+    keyframe. We run ffmpeg's scene filter + showinfo and return the
+    scene-change keyframe closest to content_duration (within
+    ±_OUTRO_SEARCH_MARGIN). Returns None if none fall in that window.
     """
-    if duration < 4.0:
-        return None
-    tail_min = duration - 5.5
-    tail_max = duration - 2.0
+    search_min = content_duration - _OUTRO_SEARCH_MARGIN
+    search_max = content_duration + _OUTRO_SEARCH_MARGIN
 
     proc = await asyncio.create_subprocess_exec(
         "ffmpeg", "-loglevel", "info", "-y",
@@ -101,6 +105,7 @@ async def _detect_outro_start(path: str, duration: float) -> Optional[float]:
         return None
 
     best: Optional[float] = None
+    best_dist: Optional[float] = None
     for line in err.decode(errors="replace").splitlines():
         if "showinfo" not in line:
             continue
@@ -111,9 +116,11 @@ async def _detect_outro_start(path: str, duration: float) -> Optional[float]:
         if not mt:
             continue
         t = float(mt.group(1))
-        if tail_min <= t <= tail_max:
-            if best is None or t > best:
-                best = t
+        if not (search_min <= t <= search_max):
+            continue
+        dist = abs(t - content_duration)
+        if best_dist is None or dist < best_dist:
+            best, best_dist = t, dist
     return best
 
 
@@ -154,17 +161,29 @@ async def _cut_reencode(path: str, to_seconds: float) -> Optional[bytes]:
             pass
 
 
+# A TikTok outro is a few seconds of branded animation baked onto the end of
+# the downloadAddr MP4. We treat the file as carrying an outro only when it
+# runs longer than TikTok's reported content duration by an amount inside this
+# range — outside it the metadata is unreliable, so we leave the file alone
+# rather than risk cutting real content.
+OUTRO_MIN_SECONDS = 1.0
+OUTRO_MAX_SECONDS = 8.0
+
+
 async def strip_tiktok_outro(video_bytes: bytes,
-                             fallback_seconds: float = 0.0) -> bytes:
+                             content_duration: Optional[float]) -> bytes:
     """Strip TikTok's auto-generated outro from a method-1 (downloadAddr) MP4.
 
-    Locates the real outro boundary via scene/keyframe detection and cuts one
-    frame before it with a libx264 re-encode (exact). If detection fails and
-    ``fallback_seconds > 0``, trims that many seconds off the tail as a last
-    resort — but that over-trims no-outro videos, so the default is 0 (leave
-    video untouched when unsure).
+    ``content_duration`` is TikTok's own reported length of the real clip
+    (from UNIVERSAL_DATA). The downloadAddr file is that clip plus a baked-in
+    outro, so ``file_duration - content_duration`` is the outro length. We
+    trim only when that difference lands in a plausible outro range, then use
+    scene detection to refine TikTok's integer-rounded boundary to the exact
+    splice keyframe. When unsure, the file is returned untouched.
     """
     if not video_bytes:
+        return video_bytes
+    if content_duration is None or content_duration <= 0:
         return video_bytes
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
         return video_bytes
@@ -174,45 +193,38 @@ async def strip_tiktok_outro(video_bytes: bytes,
         tmp_path = tmp.name
 
     try:
-        duration = await _probe_duration(tmp_path)
-        if duration is None:
+        file_duration = await _probe_duration(tmp_path)
+        if file_duration is None:
             return video_bytes
 
-        outro_start = await _detect_outro_start(tmp_path, duration)
-        if outro_start is not None:
-            # Cut ~1 frame before the outro's first keyframe to exclude it.
-            target = max(0.1, outro_start - 0.04)
-            out = await _cut_reencode(tmp_path, target)
-            if out:
-                logging.info(
-                    f"outro stripped (detected at {outro_start:.2f}s): "
-                    f"{duration:.2f}s -> {target:.2f}s "
-                    f"(bytes {len(video_bytes)} -> {len(out)})"
-                )
-                return out
-            logging.warning("detected outro cut failed, falling back")
-
-        if fallback_seconds <= 0:
+        excess = file_duration - content_duration
+        if excess < OUTRO_MIN_SECONDS:
             logging.info(
-                f"no outro detected in {duration:.2f}s video — leaving untouched"
+                f"no outro: file {file_duration:.2f}s vs content "
+                f"{content_duration:.2f}s — leaving untouched"
+            )
+            return video_bytes
+        if excess > OUTRO_MAX_SECONDS:
+            logging.info(
+                f"implausible outro {excess:.2f}s (file {file_duration:.2f}s, "
+                f"content {content_duration:.2f}s) — leaving untouched"
             )
             return video_bytes
 
-        target = duration - fallback_seconds
-        if target <= 0.1:
-            logging.info(
-                f"skip outro trim: duration={duration:.2f}s "
-                f"<= trim={fallback_seconds:.2f}s"
-            )
-            return video_bytes
-
+        # Cut ~1 frame before the splice keyframe to exclude the outro; if no
+        # keyframe is found, fall back to TikTok's reported content boundary.
+        splice = await _detect_outro_splice(tmp_path, content_duration)
+        target = max(0.1, splice - 0.04) if splice is not None else content_duration
         out = await _cut_reencode(tmp_path, target)
         if not out:
+            logging.warning("outro cut failed — leaving untouched")
             return video_bytes
+
+        splice_str = f"{splice:.2f}s" if splice is not None else "n/a"
         logging.info(
-            f"outro stripped (fallback {fallback_seconds:.1f}s): "
-            f"{duration:.2f}s -> {target:.2f}s "
-            f"(bytes {len(video_bytes)} -> {len(out)})"
+            f"outro stripped: {file_duration:.2f}s -> {target:.2f}s "
+            f"(content {content_duration:.2f}s, splice {splice_str}, "
+            f"bytes {len(video_bytes)} -> {len(out)})"
         )
         return out
     finally:

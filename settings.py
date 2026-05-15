@@ -22,8 +22,3 @@ SUPABASE_KEY = config('SUPABASE_KEY', default='')
 MAX_CONCURRENT_DOWNLOADS = config('MAX_CONCURRENT_DOWNLOADS', default=2, cast=int)
 
 SHADOW_FILTER_ENABLED = config('SHADOW_FILTER_ENABLED', default=1, cast=int) == 1
-
-# Fallback trim length (seconds) used when outro detection fails on a method-1
-# download. 0 = no fallback (trust detection). Only raise this if you see
-# outros slipping through; non-zero risks over-trimming no-outro videos.
-OUTRO_TRIM_SECONDS = config('OUTRO_TRIM_SECONDS', default=0.0, cast=float)
